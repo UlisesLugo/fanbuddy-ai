@@ -28,9 +28,13 @@ import {
   KeyboardEvent,
   useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
+
+import type { Itinerary } from '@/lib/types/itinerary';
+import { itinerarySchema } from '@/lib/types/itinerary';
 
 const USER_AVATAR =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAY1f4voJura_4QT6uFG36VKeOxxEFTPgk9SIJG5SLiLz4mSlL3s__8iX1WLU-t-FzIC52OJtcokCWu1eIjvveVmXeImFiAKczjvtnIEHu14jY6kwwxDtHGTG19s4Jp9WLYwJ-pLN6oo5xKzyRWnV7-XHzF8EfYEES-dQ3-w1bTZUjfoy7-Hko3uGnK_8Z8du14k-ePf6VnsvtSDVdcTWU1eQJU1fb0VPFK7spKvqO7rWoyRzJeMVAsAlLgspk9UerYkBrJLI4x-Fg';
@@ -62,17 +66,38 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     id: '1',
     role: 'ai',
     kind: 'text',
-    time: '10:24 AM',
-    body: "I've analyzed the upcoming fixtures. El Clásico is scheduled for next month at the Bernabéu. Would you like to see ticket options and flight bundles from London?",
+    time: '',
+    body: "Hi! I'm FanBuddy — tell me your home city and favorite club, and I'll run a mock trip plan (flights, stay, and kickoff buffers) through our AI engine.",
   },
-  {
-    id: '2',
-    role: 'user',
-    time: '10:25 AM',
-    body: 'Yes, please! Looking for the best value but with a decent hotel near the stadium.',
-  },
-  { id: '3', role: 'ai', kind: 'cards', time: '10:26 AM' },
 ];
+
+function chatToApiMessages(chat: ChatMessage[]): {
+  role: 'user' | 'assistant';
+  content: string;
+}[] {
+  const out: { role: 'user' | 'assistant'; content: string }[] = [];
+  for (const m of chat) {
+    if (m.role === 'user') {
+      out.push({ role: 'user', content: m.body });
+    } else if (m.kind === 'text') {
+      out.push({ role: 'assistant', content: m.body });
+    }
+  }
+  return out;
+}
+
+function formatItineraryTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
 
 function AiAvatar() {
   return (
@@ -211,8 +236,15 @@ const QUICK_CHIPS: { label: string; text: string; icon: typeof Plane }[] = [
 export function PlanningChat() {
   const [items, setItems] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState('');
+  const [liveItinerary, setLiveItinerary] = useState<Itinerary | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const skipInitialScrollRef = useRef(true);
+
+  const userPreferences = useMemo(
+    () => ({ originCity: 'London', favoriteTeam: 'Real Madrid' }),
+    [],
+  );
 
   useLayoutEffect(() => {
     const el = scrollAreaRef.current;
@@ -224,35 +256,166 @@ export function PlanningChat() {
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [items]);
 
-  const pushUserMessage = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setItems((prev) => [
-      ...prev,
+  const runPlanningGraph = useCallback(
+    async (conversation: ChatMessage[]) => {
+      const messages = chatToApiMessages(conversation);
+      if (
+        messages.length === 0 ||
+        messages[messages.length - 1]?.role !== 'user'
+      ) {
+        return;
+      }
+      setChatBusy(true);
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages,
+            user_preferences: userPreferences,
+          }),
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText || `HTTP ${res.status}`);
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error('No response body');
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let lastAssistantContent: string | null = null;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const evt = JSON.parse(line) as
+              | { type: 'state'; data: { itinerary?: unknown } }
+              | {
+                  type: 'done';
+                  itinerary: unknown;
+                  messages?: { role: string; content: string }[];
+                }
+              | { type: 'error'; message: string };
+            if (evt.type === 'state' && evt.data?.itinerary) {
+              const parsed = itinerarySchema.safeParse(evt.data.itinerary);
+              if (parsed.success) setLiveItinerary(parsed.data);
+            }
+            if (evt.type === 'done') {
+              if (evt.itinerary) {
+                const parsed = itinerarySchema.safeParse(evt.itinerary);
+                if (parsed.success) setLiveItinerary(parsed.data);
+              }
+              const lastAi = [...(evt.messages ?? [])]
+                .reverse()
+                .find((m) => m.role === 'assistant');
+              if (lastAi?.content) lastAssistantContent = lastAi.content;
+            }
+            if (evt.type === 'error') {
+              throw new Error(evt.message);
+            }
+          }
+        }
+        const summary =
+          lastAssistantContent?.split('\n\n')[0]?.trim() ??
+          'Trip planner finished.';
+        setItems((prev) => [
+          ...prev,
+          {
+            id: newId(),
+            role: 'ai',
+            kind: 'text',
+            time: formatMessageTime(new Date()),
+            body: summary,
+          },
+        ]);
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : 'Something went wrong.';
+        setItems((prev) => [
+          ...prev,
+          {
+            id: newId(),
+            role: 'ai',
+            kind: 'text',
+            time: formatMessageTime(new Date()),
+            body: `Sorry — ${msg}`,
+          },
+        ]);
+      } finally {
+        setChatBusy(false);
+      }
+    },
+    [userPreferences],
+  );
+
+  const sendChipAndPlan = useCallback(
+    (text: string) => {
+      if (chatBusy) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const nextConversation: ChatMessage[] = [
+        ...items,
+        {
+          id: newId(),
+          role: 'user',
+          body: trimmed,
+          time: formatMessageTime(new Date()),
+        },
+      ];
+      setItems(nextConversation);
+      void runPlanningGraph(nextConversation);
+    },
+    [items, chatBusy, runPlanningGraph],
+  );
+
+  function shortTripLabel(it: Itinerary | null) {
+    if (!it) return 'Madrid';
+    const v = it.main_event.venue.toLowerCase();
+    if (v.includes('bernabéu') || v.includes('bernabeu')) return 'Madrid';
+    if (v.includes('emirates')) return 'London';
+    if (v.includes('camp nou')) return 'Barcelona';
+    return it.main_event.venue;
+  }
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed || chatBusy) return;
+    const nextConversation: ChatMessage[] = [
+      ...items,
       {
         id: newId(),
         role: 'user',
         body: trimmed,
         time: formatMessageTime(new Date()),
       },
-    ]);
-  }, []);
-
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    pushUserMessage(trimmed);
+    ];
+    setItems(nextConversation);
     setDraft('');
+    void runPlanningGraph(nextConversation);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const trimmed = draft.trim();
-      if (!trimmed) return;
-      pushUserMessage(trimmed);
+      if (!trimmed || chatBusy) return;
+      const nextConversation: ChatMessage[] = [
+        ...items,
+        {
+          id: newId(),
+          role: 'user',
+          body: trimmed,
+          time: formatMessageTime(new Date()),
+        },
+      ];
+      setItems(nextConversation);
       setDraft('');
+      void runPlanningGraph(nextConversation);
     }
   }
 
@@ -337,10 +500,10 @@ export function PlanningChat() {
               <div className="flex items-center justify-between border-b border-landing-outline-variant/10 px-4 py-5 sm:px-8 sm:py-6">
                 <div>
                   <h2 className="font-headline text-lg font-bold tracking-tight sm:text-xl">
-                    Trip Planner: Madrid
+                    Trip Planner: {shortTripLabel(liveItinerary)}
                   </h2>
                   <p className="text-[10px] uppercase tracking-wider text-landing-on-surface-variant">
-                    AI Assistant Online
+                    {chatBusy ? 'Planning…' : 'AI Assistant Online'}
                   </p>
                 </div>
                 <div className="flex -space-x-2">
@@ -374,9 +537,11 @@ export function PlanningChat() {
                         <div className="max-w-[80%] rounded-2xl rounded-tr-none bg-landing-primary p-4 text-white shadow-sm">
                           {m.body}
                         </div>
-                        <span className="mr-1 text-[10px] text-landing-on-surface-variant/60">
-                          {m.time}
-                        </span>
+                        {m.time ? (
+                          <span className="mr-1 text-[10px] text-landing-on-surface-variant/60">
+                            {m.time}
+                          </span>
+                        ) : null}
                       </div>
                     );
                   }
@@ -388,9 +553,11 @@ export function PlanningChat() {
                           <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 leading-relaxed text-landing-on-surface">
                             {m.body}
                           </div>
-                          <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">
-                            {m.time}
-                          </span>
+                          {m.time ? (
+                            <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">
+                              {m.time}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -408,8 +575,9 @@ export function PlanningChat() {
                         <button
                           key={c.label}
                           type="button"
-                          onClick={() => pushUserMessage(c.text)}
-                          className="flex shrink-0 items-center gap-2 rounded-full bg-landing-container-low px-4 py-2 text-xs font-medium text-landing-on-surface-variant transition-colors hover:bg-landing-container"
+                          onClick={() => sendChipAndPlan(c.text)}
+                          disabled={chatBusy}
+                          className="flex shrink-0 items-center gap-2 rounded-full bg-landing-container-low px-4 py-2 text-xs font-medium text-landing-on-surface-variant transition-colors hover:bg-landing-container disabled:opacity-50"
                         >
                           <Icon className="size-4 shrink-0" strokeWidth={2} />
                           {c.label}
@@ -423,15 +591,17 @@ export function PlanningChat() {
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        className="w-full rounded-2xl border-none bg-landing-container-low py-4 pl-6 pr-16 text-sm text-landing-on-surface placeholder:text-landing-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-landing-primary/20"
+                        className="w-full rounded-2xl border-none bg-landing-container-low py-4 pl-6 pr-16 text-sm text-landing-on-surface placeholder:text-landing-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-landing-primary/20 disabled:opacity-60"
                         placeholder="Ask FanBuddy anything about your trip..."
                         type="text"
                         autoComplete="off"
                         aria-label="Message"
+                        disabled={chatBusy}
                       />
                       <button
                         type="submit"
-                        className="absolute right-3 rounded-xl bg-pitch-gradient p-2 text-white shadow-md transition-all hover:opacity-90 active:scale-90"
+                        disabled={chatBusy}
+                        className="absolute right-3 rounded-xl bg-pitch-gradient p-2 text-white shadow-md transition-all hover:opacity-90 active:scale-90 disabled:opacity-50"
                         aria-label="Send"
                       >
                         <Send className="size-5" strokeWidth={2} />
@@ -449,6 +619,13 @@ export function PlanningChat() {
               <h3 className="mb-8 font-headline text-lg font-bold tracking-tight">
                 Live Itinerary
               </h3>
+              {liveItinerary?.planning_failed ? (
+                <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                  Provisional plan — validation:{' '}
+                  {(liveItinerary.validation_errors ?? []).join(' · ') ||
+                    'see chat'}
+                </p>
+              ) : null}
               <div className="relative space-y-10">
                 <div className="absolute bottom-2 left-[11px] top-2 w-0.5 bg-landing-outline-variant/20" />
                 <div className="relative flex gap-4">
@@ -463,9 +640,15 @@ export function PlanningChat() {
                     <h4 className="text-xs font-bold uppercase tracking-wider text-landing-primary">
                       Flight Outbound
                     </h4>
-                    <p className="mt-1 text-sm font-semibold">LHR → MAD</p>
+                    <p className="mt-1 text-sm font-semibold">
+                      {liveItinerary?.flight_outbound.label ?? '—'}
+                    </p>
                     <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                      Apr 21, 10:30 AM
+                      {liveItinerary
+                        ? formatItineraryTime(
+                            liveItinerary.flight_outbound.depart_iso,
+                          )
+                        : 'Send a message to plan'}
                     </p>
                   </div>
                 </div>
@@ -476,15 +659,17 @@ export function PlanningChat() {
                       strokeWidth={2}
                     />
                   </div>
-                  <div className="opacity-60">
+                  <div className={liveItinerary ? '' : 'opacity-60'}>
                     <h4 className="text-xs font-bold uppercase tracking-wider">
                       Accommodation
                     </h4>
                     <p className="mt-1 text-sm font-semibold">
-                      Pestana CR7 Madrid
+                      {liveItinerary?.accommodation.name ?? '—'}
                     </p>
                     <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                      3 Nights • Suggested
+                      {liveItinerary
+                        ? `${liveItinerary.accommodation.nights} Nights • ${liveItinerary.accommodation.status_label}`
+                        : '—'}
                     </p>
                   </div>
                 </div>
@@ -495,15 +680,17 @@ export function PlanningChat() {
                       strokeWidth={2}
                     />
                   </div>
-                  <div className="opacity-60">
+                  <div className={liveItinerary ? '' : 'opacity-60'}>
                     <h4 className="text-xs font-bold uppercase tracking-wider">
                       Main Event
                     </h4>
                     <p className="mt-1 text-sm font-semibold">
-                      Santiago Bernabéu
+                      {liveItinerary?.main_event.venue ?? '—'}
                     </p>
                     <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                      Kickoff: Apr 22, 9:00 PM
+                      {liveItinerary
+                        ? `Kickoff: ${formatItineraryTime(liveItinerary.main_event.kickoff_iso)} · ${liveItinerary.status}`
+                        : '—'}
                     </p>
                   </div>
                 </div>
@@ -523,19 +710,31 @@ export function PlanningChat() {
                     <span className="text-landing-on-surface-variant">
                       Flights
                     </span>
-                    <span className="font-medium">120 EUR</span>
+                    <span className="font-medium">
+                      {liveItinerary
+                        ? `${liveItinerary.costs.flights_eur} EUR`
+                        : '—'}
+                    </span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-landing-on-surface-variant">
                       Match Tickets
                     </span>
-                    <span className="font-medium">245 EUR</span>
+                    <span className="font-medium">
+                      {liveItinerary
+                        ? `${liveItinerary.costs.match_tickets_eur} EUR`
+                        : '—'}
+                    </span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-landing-on-surface-variant">
                       Stay (Avg)
                     </span>
-                    <span className="font-medium">285 EUR</span>
+                    <span className="font-medium">
+                      {liveItinerary
+                        ? `${liveItinerary.costs.stay_eur} EUR`
+                        : '—'}
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-end justify-between border-t border-landing-outline-variant/10 pt-4">
@@ -544,7 +743,9 @@ export function PlanningChat() {
                       TOTAL
                     </p>
                     <p className="font-headline text-2xl font-black text-landing-on-surface">
-                      650 EUR
+                      {liveItinerary
+                        ? `${liveItinerary.costs.total_eur} EUR`
+                        : '—'}
                     </p>
                   </div>
                   <div className="rounded-lg bg-landing-primary p-1 text-landing-primary-container">
