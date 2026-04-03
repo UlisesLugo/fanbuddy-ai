@@ -1,0 +1,10 @@
+---
+description: Use published icon packs for brand logos; no hand-authored brand SVGs
+alwaysApply: true
+---
+
+# Brand logos and provider marks
+
+For third-party brand marks (Google, Apple, OAuth/social providers, app stores, etc.), import from a maintained open-source set—for example **`react-icons`** (`react-icons/fc`, `react-icons/si`, and other subpaths) or another established package.
+
+Do **not** paste or maintain custom inline SVG `<path>` data for those brands in app components unless taken verbatim from a linked, vendor-approved asset workflow the team owns.
