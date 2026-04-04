@@ -32,6 +32,8 @@ import {
   useState,
 } from 'react';
 
+import type { ChatStreamEvent, FormattedItinerary } from '@/lib/langchain/types';
+
 const USER_AVATAR =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAY1f4voJura_4QT6uFG36VKeOxxEFTPgk9SIJG5SLiLz4mSlL3s__8iX1WLU-t-FzIC52OJtcokCWu1eIjvveVmXeImFiAKczjvtnIEHu14jY6kwwxDtHGTG19s4Jp9WLYwJ-pLN6oo5xKzyRWnV7-XHzF8EfYEES-dQ3-w1bTZUjfoy7-Hko3uGnK_8Z8du14k-ePf6VnsvtSDVdcTWU1eQJU1fb0VPFK7spKvqO7rWoyRzJeMVAsAlLgspk9UerYkBrJLI4x-Fg';
 
@@ -55,23 +57,16 @@ function newId() {
 type ChatMessage =
   | { id: string; role: 'ai'; kind: 'text'; body: string; time: string }
   | { id: string; role: 'user'; body: string; time: string }
-  | { id: string; role: 'ai'; kind: 'cards'; time: string };
+  | { id: string; role: 'ai'; kind: 'cards'; time: string; itinerary: FormattedItinerary | null };
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
     id: '1',
     role: 'ai',
     kind: 'text',
-    time: '10:24 AM',
-    body: "I've analyzed the upcoming fixtures. El Clásico is scheduled for next month at the Bernabéu. Would you like to see ticket options and flight bundles from London?",
+    time: formatMessageTime(new Date()),
+    body: "Hi! I'm FanBuddy, your personal football travel assistant. To get started, tell me your origin city, your favourite team, and which match you'd like to attend — I'll take care of the rest.",
   },
-  {
-    id: '2',
-    role: 'user',
-    time: '10:25 AM',
-    body: 'Yes, please! Looking for the best value but with a decent hotel near the stadium.',
-  },
-  { id: '3', role: 'ai', kind: 'cards', time: '10:26 AM' },
 ];
 
 function AiAvatar() {
@@ -82,7 +77,39 @@ function AiAvatar() {
   );
 }
 
-function RichCardsBlock({ time }: { time: string }) {
+function formatDate(isoUtc: string) {
+  try {
+    return new Date(isoUtc).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch {
+    return isoUtc;
+  }
+}
+
+function RichCardsBlock({
+  time,
+  itinerary,
+}: {
+  time: string;
+  itinerary: FormattedItinerary;
+}) {
+  const homeTeam = itinerary.match.homeTeam;
+  const awayTeam = itinerary.match.awayTeam;
+  const league = itinerary.match.league;
+  const matchday = itinerary.match.matchday;
+  const ticketPrice = itinerary.match.ticketPriceEur;
+  const isProvisional = itinerary.validationStatus === 'PROVISIONAL';
+
+  const outbound = itinerary.flight.outbound;
+  const inbound = itinerary.flight.inbound;
+  const flightLabel = `${outbound.origin} → ${outbound.destination}`;
+  const airline = outbound.airline;
+  const direct = outbound.direct;
+  const flightDates = `${formatDate(outbound.departureUtc)} – ${formatDate(inbound.departureUtc)}`;
+  const flightTotal = itinerary.flight.totalPriceEur;
+
   return (
     <div className="flex max-w-[90%] gap-4">
       <AiAvatar />
@@ -100,10 +127,15 @@ function RichCardsBlock({ time }: { time: string }) {
               sizes="320px"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-landing-on-surface/80 to-transparent" />
-            <div className="absolute bottom-3 left-4 text-white">
+            <div className="absolute bottom-3 left-4 flex items-center gap-2 text-white">
               <p className="text-[10px] uppercase tracking-widest opacity-80">
-                La Liga • Matchday 32
+                {league} • {matchday}
               </p>
+              {isProvisional && (
+                <span className="rounded-full bg-amber-400/90 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-900">
+                  PROVISIONAL
+                </span>
+              )}
             </div>
           </div>
           <div className="p-5">
@@ -115,7 +147,7 @@ function RichCardsBlock({ time }: { time: string }) {
                     strokeWidth={2}
                   />
                 </div>
-                <p className="text-[10px] font-bold">REAL MADRID</p>
+                <p className="text-[10px] font-bold">{homeTeam}</p>
               </div>
               <div className="font-headline font-bold text-landing-on-surface-variant">
                 VS
@@ -127,7 +159,7 @@ function RichCardsBlock({ time }: { time: string }) {
                     strokeWidth={2}
                   />
                 </div>
-                <p className="text-[10px] font-bold">BARCELONA</p>
+                <p className="text-[10px] font-bold">{awayTeam}</p>
               </div>
             </div>
             <div className="flex items-center justify-between border-t border-landing-outline-variant/15 pt-4">
@@ -136,7 +168,7 @@ function RichCardsBlock({ time }: { time: string }) {
                   Starting from
                 </p>
                 <p className="font-headline text-lg font-extrabold text-landing-primary">
-                  245 EUR
+                  {ticketPrice} EUR
                 </p>
               </div>
               <button
@@ -158,9 +190,9 @@ function RichCardsBlock({ time }: { time: string }) {
                 />
               </div>
               <div>
-                <h4 className="text-sm font-bold">London to Madrid</h4>
+                <h4 className="text-sm font-bold">{flightLabel}</h4>
                 <p className="text-[10px] text-landing-on-surface-variant">
-                  Direct • British Airways
+                  {direct ? 'Direct' : 'Connecting'} • {airline}
                 </p>
               </div>
             </div>
@@ -170,8 +202,8 @@ function RichCardsBlock({ time }: { time: string }) {
           </div>
           <div className="flex items-end justify-between">
             <div className="space-y-1">
-              <p className="text-xs font-medium">Apr 21 - Apr 24</p>
-              <p className="font-headline text-lg font-black">120 EUR</p>
+              <p className="text-xs font-medium">{flightDates}</p>
+              <p className="font-headline text-lg font-black">{flightTotal} EUR</p>
             </div>
             <button
               type="button"
@@ -211,6 +243,11 @@ const QUICK_CHIPS: { label: string; text: string; icon: typeof Plane }[] = [
 export function PlanningChat() {
   const [items, setItems] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('FanBuddy is planning your trip...');
+  const [currentItinerary, setCurrentItinerary] = useState<FormattedItinerary | null>(null);
+  // Stable thread_id for this session — enables conversation memory across messages
+  const [threadId] = useState(() => crypto.randomUUID());
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const skipInitialScrollRef = useRef(true);
 
@@ -222,36 +259,125 @@ export function PlanningChat() {
       return;
     }
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-  }, [items]);
+  }, [items, isLoading]);
 
   const pushUserMessage = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
     setItems((prev) => [
       ...prev,
       {
         id: newId(),
         role: 'user',
-        body: trimmed,
+        body: text,
         time: formatMessageTime(new Date()),
       },
     ]);
   }, []);
 
+  const pushAiText = useCallback((body: string) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        role: 'ai',
+        kind: 'text',
+        body,
+        time: formatMessageTime(new Date()),
+      },
+    ]);
+  }, []);
+
+  const pushAiCards = useCallback((itinerary: FormattedItinerary) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        role: 'ai',
+        kind: 'cards',
+        time: formatMessageTime(new Date()),
+        itinerary,
+      },
+    ]);
+  }, []);
+
+  const handleSendMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isLoading) return;
+
+      pushUserMessage(trimmed);
+      setIsLoading(true);
+      setLoadingMessage('Connecting...');
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: trimmed,
+            thread_id: threadId,
+            user_preferences: {
+              origin_city: 'London',
+              favorite_team: 'Real Madrid',
+            },
+          }),
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          // Keep the last (potentially incomplete) line in the buffer
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const event = JSON.parse(line.slice(6)) as ChatStreamEvent;
+
+              if (event.type === 'status') {
+                setLoadingMessage(event.message);
+              } else if (event.type === 'done') {
+                pushAiText(event.reply);
+                if (event.itinerary) {
+                  pushAiCards(event.itinerary);
+                  setCurrentItinerary(event.itinerary);
+                }
+              } else if (event.type === 'error') {
+                pushAiText(event.message);
+              }
+            } catch {
+              // Ignore malformed SSE lines
+            }
+          }
+        }
+      } catch {
+        pushAiText('Could not reach FanBuddy. Please check your connection and try again.');
+      } finally {
+        setIsLoading(false);
+        setLoadingMessage('FanBuddy is planning your trip...');
+      }
+    },
+    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards],
+  );
+
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    pushUserMessage(trimmed);
+    handleSendMessage(draft);
     setDraft('');
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      const trimmed = draft.trim();
-      if (!trimmed) return;
-      pushUserMessage(trimmed);
+      handleSendMessage(draft);
       setDraft('');
     }
   }
@@ -337,7 +463,9 @@ export function PlanningChat() {
               <div className="flex items-center justify-between border-b border-landing-outline-variant/10 px-4 py-5 sm:px-8 sm:py-6">
                 <div>
                   <h2 className="font-headline text-lg font-bold tracking-tight sm:text-xl">
-                    Trip Planner: Madrid
+                    {currentItinerary
+                      ? `Trip Planner: ${currentItinerary.flight.outbound.destination}`
+                      : 'Trip Planner'}
                   </h2>
                   <p className="text-[10px] uppercase tracking-wider text-landing-on-surface-variant">
                     AI Assistant Online
@@ -395,8 +523,24 @@ export function PlanningChat() {
                       </div>
                     );
                   }
-                  return <RichCardsBlock key={m.id} time={m.time} />;
+                  if (!m.itinerary) return null;
+                  return (
+                    <RichCardsBlock
+                      key={m.id}
+                      time={m.time}
+                      itinerary={m.itinerary}
+                    />
+                  );
                 })}
+
+                {isLoading && (
+                  <div className="flex max-w-[85%] gap-4">
+                    <AiAvatar />
+                    <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-sm text-landing-on-surface-variant animate-pulse">
+                      {loadingMessage}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white p-4 sm:p-6">
@@ -408,8 +552,9 @@ export function PlanningChat() {
                         <button
                           key={c.label}
                           type="button"
-                          onClick={() => pushUserMessage(c.text)}
-                          className="flex shrink-0 items-center gap-2 rounded-full bg-landing-container-low px-4 py-2 text-xs font-medium text-landing-on-surface-variant transition-colors hover:bg-landing-container"
+                          disabled={isLoading}
+                          onClick={() => handleSendMessage(c.text)}
+                          className="flex shrink-0 items-center gap-2 rounded-full bg-landing-container-low px-4 py-2 text-xs font-medium text-landing-on-surface-variant transition-colors hover:bg-landing-container disabled:opacity-50"
                         >
                           <Icon className="size-4 shrink-0" strokeWidth={2} />
                           {c.label}
@@ -423,7 +568,8 @@ export function PlanningChat() {
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        className="w-full rounded-2xl border-none bg-landing-container-low py-4 pl-6 pr-16 text-sm text-landing-on-surface placeholder:text-landing-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-landing-primary/20"
+                        disabled={isLoading}
+                        className="w-full rounded-2xl border-none bg-landing-container-low py-4 pl-6 pr-16 text-sm text-landing-on-surface placeholder:text-landing-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-landing-primary/20 disabled:opacity-50"
                         placeholder="Ask FanBuddy anything about your trip..."
                         type="text"
                         autoComplete="off"
@@ -431,7 +577,8 @@ export function PlanningChat() {
                       />
                       <button
                         type="submit"
-                        className="absolute right-3 rounded-xl bg-pitch-gradient p-2 text-white shadow-md transition-all hover:opacity-90 active:scale-90"
+                        disabled={isLoading || !draft.trim()}
+                        className="absolute right-3 rounded-xl bg-pitch-gradient p-2 text-white shadow-md transition-all hover:opacity-90 active:scale-90 disabled:opacity-50"
                         aria-label="Send"
                       >
                         <Send className="size-5" strokeWidth={2} />
@@ -449,109 +596,115 @@ export function PlanningChat() {
               <h3 className="mb-8 font-headline text-lg font-bold tracking-tight">
                 Live Itinerary
               </h3>
-              <div className="relative space-y-10">
-                <div className="absolute bottom-2 left-[11px] top-2 w-0.5 bg-landing-outline-variant/20" />
-                <div className="relative flex gap-4">
-                  <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-landing-primary">
-                    <Plane
-                      className="size-3.5 text-white"
-                      strokeWidth={2}
-                      fill="currentColor"
-                    />
+
+              {!currentItinerary ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-landing-container-highest">
+                    <Compass className="size-7 text-landing-on-surface-variant/40" strokeWidth={1.5} />
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-landing-primary">
-                      Flight Outbound
-                    </h4>
-                    <p className="mt-1 text-sm font-semibold">LHR → MAD</p>
-                    <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                      Apr 21, 10:30 AM
-                    </p>
-                  </div>
+                  <p className="text-sm font-semibold text-landing-on-surface-variant">No trip planned yet</p>
+                  <p className="text-xs text-landing-on-surface-variant/60">
+                    Your itinerary will appear here once FanBuddy plans your trip.
+                  </p>
                 </div>
-                <div className="relative flex gap-4">
-                  <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
-                    <Hotel
-                      className="size-3.5 text-landing-on-surface-variant"
-                      strokeWidth={2}
-                    />
+              ) : (
+                <>
+                  <div className="relative space-y-10">
+                    <div className="absolute bottom-2 left-[11px] top-2 w-0.5 bg-landing-outline-variant/20" />
+                    <div className="relative flex gap-4">
+                      <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-landing-primary">
+                        <Plane
+                          className="size-3.5 text-white"
+                          strokeWidth={2}
+                          fill="currentColor"
+                        />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-landing-primary">
+                          Flight Outbound
+                        </h4>
+                        <p className="mt-1 text-sm font-semibold">
+                          {currentItinerary.flight.outbound.origin} → {currentItinerary.flight.outbound.destination}
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
+                          {formatDate(currentItinerary.flight.outbound.departureUtc)}, {currentItinerary.flight.outbound.airline}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="relative flex gap-4">
+                      <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
+                        <Hotel
+                          className="size-3.5 text-landing-on-surface-variant"
+                          strokeWidth={2}
+                        />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider">
+                          Accommodation
+                        </h4>
+                        <p className="mt-1 text-sm font-semibold">{currentItinerary.hotel.name}</p>
+                        <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
+                          {currentItinerary.hotel.nights} Nights •{' '}
+                          {currentItinerary.hotel.wasDowngraded ? 'Downgraded' : 'Suggested'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="relative flex gap-4">
+                      <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
+                        <Landmark
+                          className="size-3.5 text-landing-on-surface-variant"
+                          strokeWidth={2}
+                        />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider">
+                          Main Event
+                        </h4>
+                        <p className="mt-1 text-sm font-semibold">{currentItinerary.match.venue}</p>
+                        <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
+                          Kickoff: {formatDate(currentItinerary.match.kickoffUtc)}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="opacity-60">
-                    <h4 className="text-xs font-bold uppercase tracking-wider">
-                      Accommodation
-                    </h4>
-                    <p className="mt-1 text-sm font-semibold">
-                      Pestana CR7 Madrid
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                      3 Nights • Suggested
-                    </p>
+                  <div className="mt-auto rounded-2xl border border-landing-outline-variant/5 bg-white p-6 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-landing-on-surface-variant">
+                        ESTIMATED COST
+                      </h4>
+                      <BarChart3
+                        className="size-4 text-landing-primary"
+                        strokeWidth={2}
+                      />
+                    </div>
+                    <div className="mb-6 space-y-3">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-landing-on-surface-variant">Flights</span>
+                        <span className="font-medium">{currentItinerary.cost.flightsEur} EUR</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-landing-on-surface-variant">Match Tickets</span>
+                        <span className="font-medium">{currentItinerary.cost.matchTicketEur} EUR</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-landing-on-surface-variant">Stay (Avg)</span>
+                        <span className="font-medium">{currentItinerary.cost.stayEur} EUR</span>
+                      </div>
+                    </div>
+                    <div className="flex items-end justify-between border-t border-landing-outline-variant/10 pt-4">
+                      <div>
+                        <p className="text-[10px] text-landing-on-surface-variant">TOTAL</p>
+                        <p className="font-headline text-2xl font-black text-landing-on-surface">
+                          {currentItinerary.cost.totalEur} EUR
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-landing-primary p-1 text-landing-primary-container">
+                        <CreditCard className="size-5" strokeWidth={2} />
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="relative flex gap-4">
-                  <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
-                    <Landmark
-                      className="size-3.5 text-landing-on-surface-variant"
-                      strokeWidth={2}
-                    />
-                  </div>
-                  <div className="opacity-60">
-                    <h4 className="text-xs font-bold uppercase tracking-wider">
-                      Main Event
-                    </h4>
-                    <p className="mt-1 text-sm font-semibold">
-                      Santiago Bernabéu
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                      Kickoff: Apr 22, 9:00 PM
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-auto rounded-2xl border border-landing-outline-variant/5 bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-landing-on-surface-variant">
-                    ESTIMATED COST
-                  </h4>
-                  <BarChart3
-                    className="size-4 text-landing-primary"
-                    strokeWidth={2}
-                  />
-                </div>
-                <div className="mb-6 space-y-3">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-landing-on-surface-variant">
-                      Flights
-                    </span>
-                    <span className="font-medium">120 EUR</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-landing-on-surface-variant">
-                      Match Tickets
-                    </span>
-                    <span className="font-medium">245 EUR</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-landing-on-surface-variant">
-                      Stay (Avg)
-                    </span>
-                    <span className="font-medium">285 EUR</span>
-                  </div>
-                </div>
-                <div className="flex items-end justify-between border-t border-landing-outline-variant/10 pt-4">
-                  <div>
-                    <p className="text-[10px] text-landing-on-surface-variant">
-                      TOTAL
-                    </p>
-                    <p className="font-headline text-2xl font-black text-landing-on-surface">
-                      650 EUR
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-landing-primary p-1 text-landing-primary-container">
-                    <CreditCard className="size-5" strokeWidth={2} />
-                  </div>
-                </div>
-              </div>
+                </>
+              )}
             </aside>
           </div>
         </main>
