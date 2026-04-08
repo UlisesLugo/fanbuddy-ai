@@ -4,6 +4,13 @@ import { tool } from '@langchain/core/tools';
 import { Annotation, END, MemorySaver, START, StateGraph } from '@langchain/langgraph';
 import { z } from 'zod';
 
+import {
+  geocodeVenue,
+  resolveTeamId,
+  searchFixtures,
+  toFanBuddyStatus,
+} from '../football-data';
+
 import type {
   FlightLeg,
   FormattedItinerary,
@@ -56,10 +63,6 @@ const GraphState = Annotation.Root({
     default: () => 0,
   }),
   formatted: Annotation<FormattedItinerary | null>({
-    reducer: (_, y) => y,
-    default: () => null,
-  }),
-  intent: Annotation<'plan_trip' | 'general_question' | 'modify_plan' | null>({
     reducer: (_, y) => y,
     default: () => null,
   }),
@@ -206,80 +209,131 @@ const downgradeHotelTool = tool(
 );
 
 // ─── Node: router_node ────────────────────────────────────────────────────────
-// Classifies user intent to avoid running the full planning pipeline for simple
-// questions. Uses withStructuredOutput for a reliable enum response.
+// Classifies user intent AND extracts travel preferences from the message in a
+// single withStructuredOutput call — no extra LLM overhead.
 
-const IntentSchema = z.object({
-  intent: z.enum(['plan_trip', 'general_question', 'modify_plan']),
+const RouterSchema = z.object({
+  origin_city: z
+    .string()
+    .nullable()
+    .describe(
+      'City the user is travelling FROM (e.g. "London", "Berlin"). Null if not mentioned.',
+    ),
+  favorite_team: z
+    .string()
+    .nullable()
+    .describe(
+      'Football club the user wants to watch (e.g. "Barcelona", "Real Madrid"). Null if not mentioned.',
+    ),
 });
 
 async function router_node(state: State): Promise<Partial<State>> {
   const lastMessage = state.messages[state.messages.length - 1];
-  const structured = model.withStructuredOutput(IntentSchema);
+  const structured = model.withStructuredOutput(RouterSchema);
 
   const result = await structured.invoke(
-    `You are a classifier for FanBuddy.AI, a football trip planning app.
-Classify the user's intent into exactly one category:
-- plan_trip: wants to plan a new football trip, find matches, search for flights or hotels, see ticket options
-- modify_plan: wants to change details of an existing trip plan (different dates, hotel, flight, etc.)
-- general_question: asking a general question, chatting, or anything that does NOT require a full trip plan
+    `You are an information extractor for FanBuddy.AI, a football trip planning app.
+
+Extract the following from the user's message if present:
+- origin_city: the city the user is travelling FROM (e.g. "from London", "leaving Berlin"). Set null if not mentioned.
+- favorite_team: the football club the user wants to watch (e.g. "watch Barcelona", "Real Madrid game"). Set null if not mentioned.
 
 User message: "${lastMessage.content}"`,
   );
 
-  return { intent: result.intent };
-}
-
-function route_after_router(
-  state: State,
-): 'search_matches_node' | 'direct_answer_node' {
-  if (state.intent === 'plan_trip' || state.intent === 'modify_plan') {
-    return 'search_matches_node';
-  }
-  return 'direct_answer_node';
-}
-
-// ─── Node: direct_answer_node ─────────────────────────────────────────────────
-// Handles general questions using full conversation history for context.
-
-async function direct_answer_node(state: State): Promise<Partial<State>> {
-  const response = await model.invoke([
-    new HumanMessage(
-      'You are FanBuddy.AI, a helpful and enthusiastic assistant for football trip planning. Answer concisely and helpfully. You have access to the full conversation history.',
-    ),
-    ...state.messages,
-  ]);
-
-  const reply =
-    typeof response.content === 'string'
-      ? response.content
-      : JSON.stringify(response.content);
-
+  // Only overwrite a preference when the user explicitly mentions it;
+  // otherwise keep the value that was persisted from a previous turn.
   return {
-    direct_reply: reply,
-    // Append the AI reply to conversation history
-    messages: [new AIMessage(reply)],
+    user_preferences: {
+      origin_city: result.origin_city ?? state.user_preferences.origin_city,
+      favorite_team: result.favorite_team ?? state.user_preferences.favorite_team,
+    },
   };
 }
 
 // ─── Node: search_matches_node ────────────────────────────────────────────────
-// Directly invokes the tool — no LLM routing overhead for deterministic calls.
+// Calls football-data.org directly — no LLM routing overhead for deterministic calls.
 
 async function search_matches_node(state: State): Promise<Partial<State>> {
-  const raw = await searchMatchesTool.invoke({
-    team: state.user_preferences.favorite_team,
-    date_from: '2026-04-03',
-    date_to: '2026-06-03',
-  });
-  const match = JSON.parse(extractToolString(raw)) as RawMatchFixture;
+  const { origin_city, favorite_team: teamName } = state.user_preferences;
 
-  return {
-    itinerary: {
-      match,
-      flight: state.itinerary?.flight ?? null,
-      hotel: state.itinerary?.hotel ?? null,
-    },
-  };
+  // Gate: ask for whichever piece of data is still missing
+  if (!teamName && !origin_city) {
+    const reply = "To get started, tell me which team you'd like to watch and the city you're travelling from.";
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+  if (!teamName) {
+    const reply = `Got it — travelling from ${origin_city}. Which team would you like to watch?`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+  if (!origin_city) {
+    const reply = `Great choice! What city are you travelling from to watch ${teamName}?`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const teamId = resolveTeamId(teamName);
+
+  if (!teamId) {
+    const reply = `Sorry, ${teamName} isn't supported yet. Try a club like Real Madrid, Barcelona, Liverpool, or Manchester City.`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  // Search window: today → 90 days out
+  const today = new Date();
+  const ninetyDaysOut = new Date(today);
+  ninetyDaysOut.setDate(today.getDate() + 90);
+  const dateFrom = today.toISOString().slice(0, 10);
+  const dateTo = ninetyDaysOut.toISOString().slice(0, 10);
+
+  try {
+    const fixtures = await searchFixtures(teamId, dateFrom, dateTo);
+
+    if (fixtures.length === 0) {
+      return {
+        itinerary: {
+          match: null,
+          flight: state.itinerary?.flight ?? null,
+          hotel: state.itinerary?.hotel ?? null,
+        },
+      };
+    }
+
+    // Pick the nearest upcoming fixture
+    const fixture = fixtures[0];
+    const venueName = fixture.venue ?? `${fixture.homeTeam.name} Stadium`;
+    const geo = await geocodeVenue(venueName);
+
+    const match: RawMatchFixture = {
+      id: String(fixture.id),
+      league: fixture.competition.name,
+      matchday: `Matchday`,
+      homeTeam: fixture.homeTeam.name,
+      awayTeam: fixture.awayTeam.name,
+      venue: venueName,
+      kickoffUtc: fixture.utcDate, // ISO 8601 UTC — required by validator_node
+      ticketPriceEur: 0, // placeholder; tickets API not yet integrated
+      tvConfirmed: toFanBuddyStatus(fixture.status) === 'CONFIRMED',
+      ...(geo ? { lat: geo.lat, lng: geo.lng, nearestAirportCode: geo.nearestAirportCode } : {}),
+    };
+
+    return {
+      itinerary: {
+        match,
+        flight: state.itinerary?.flight ?? null,
+        hotel: state.itinerary?.hotel ?? null,
+      },
+    };
+  } catch (err) {
+    console.error('[search_matches_node] football-data.org call failed:', err);
+    // Degrade gracefully — return empty match so the graph can surface the error
+    return {
+      itinerary: {
+        match: null,
+        flight: state.itinerary?.flight ?? null,
+        hotel: state.itinerary?.hotel ?? null,
+      },
+    };
+  }
 }
 
 // ─── Node: plan_travel_node ───────────────────────────────────────────────────
@@ -454,7 +508,12 @@ Flight: ${itinerary.flight.outbound.airline}, €${flightsEur}. Hotel: ${itinera
   };
 }
 
-// ─── Conditional Edge ─────────────────────────────────────────────────────────
+// ─── Conditional Edges ────────────────────────────────────────────────────────
+
+// Short-circuit to END if search_matches_node returned a prompt (missing data / unsupported team).
+function afterSearchMatches(state: State): 'plan_travel_node' | typeof END {
+  return state.direct_reply ? END : 'plan_travel_node';
+}
 
 function shouldRetryOrFinish(
   state: State,
@@ -474,24 +533,22 @@ const checkpointer = new MemorySaver();
 
 const graph = new StateGraph(GraphState)
   .addNode('router_node', router_node)
-  .addNode('direct_answer_node', direct_answer_node)
   .addNode('search_matches_node', search_matches_node)
   .addNode('plan_travel_node', plan_travel_node)
   .addNode('validator_node', validator_node)
   .addNode('formatter_node', formatter_node)
   .addEdge(START, 'router_node')
-  .addConditionalEdges('router_node', route_after_router, {
-    search_matches_node: 'search_matches_node',
-    direct_answer_node: 'direct_answer_node',
+  .addEdge('router_node', 'search_matches_node')
+  .addConditionalEdges('search_matches_node', afterSearchMatches, {
+    plan_travel_node: 'plan_travel_node',
+    [END]: END,
   })
-  .addEdge('search_matches_node', 'plan_travel_node')
   .addEdge('plan_travel_node', 'validator_node')
   .addConditionalEdges('validator_node', shouldRetryOrFinish, {
     plan_travel_node: 'plan_travel_node',
     formatter_node: 'formatter_node',
   })
   .addEdge('formatter_node', END)
-  .addEdge('direct_answer_node', END)
   .compile({ checkpointer });
 
 export { graph };
