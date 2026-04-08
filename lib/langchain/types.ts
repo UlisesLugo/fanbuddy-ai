@@ -72,6 +72,7 @@ export interface RawMatchFixture {
   kickoffUtc: string;
   ticketPriceEur: number;
   tvConfirmed: boolean;
+  nearestAirportCode?: string;
 }
 
 export interface RawFlightOption {

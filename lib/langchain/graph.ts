@@ -11,6 +11,8 @@ import {
   toFanBuddyStatus,
 } from '../football-data';
 
+import { searchRoundTrip, type FlightOption } from '../amadeus-flights';
+
 import type {
   FlightLeg,
   FormattedItinerary,
@@ -70,6 +72,14 @@ const GraphState = Annotation.Root({
     reducer: (_, y) => y,
     default: () => null,
   }),
+  flight_results: Annotation<FlightOption[] | null>({
+    reducer: (_, y) => y,
+    default: () => null,
+  }),
+  flight_results_cursor: Annotation<number>({
+    reducer: (_, y) => y,
+    default: () => 0,
+  }),
 });
 
 type State = typeof GraphState.State;
@@ -106,47 +116,6 @@ const searchMatchesTool = tool(
   },
 );
 
-const searchFlightsTool = tool(
-  async (_args: {
-    origin: string;
-    destination: string;
-    date: string;
-    return_date: string;
-  }) => {
-    void _args;
-    const outbound: FlightLeg = {
-      origin: 'LHR',
-      destination: 'MAD',
-      departureUtc: '2026-05-09T07:00:00Z',
-      arrivalUtc: '2026-05-09T10:30:00Z',
-      airline: 'British Airways',
-      direct: true,
-      priceEur: 60,
-    };
-    const inbound: FlightLeg = {
-      origin: 'MAD',
-      destination: 'LHR',
-      departureUtc: '2026-05-12T14:00:00Z',
-      arrivalUtc: '2026-05-12T15:30:00Z',
-      airline: 'British Airways',
-      direct: true,
-      priceEur: 60,
-    };
-    const result: RawFlightOption = { outbound, inbound };
-    return JSON.stringify(result);
-  },
-  {
-    name: 'search_flights',
-    description:
-      'Search round-trip flights between two cities. Returns the cheapest available option.',
-    schema: z.object({
-      origin: z.string().describe('Origin city or IATA code'),
-      destination: z.string().describe('Destination city or IATA code'),
-      date: z.string().describe('Outbound departure date YYYY-MM-DD'),
-      return_date: z.string().describe('Return departure date YYYY-MM-DD'),
-    }),
-  },
-);
 
 const searchHotelsTool = tool(
   async (_args: {
@@ -337,35 +306,126 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
 }
 
 // ─── Node: plan_travel_node ───────────────────────────────────────────────────
-// Directly invokes flight + hotel tools and applies the budget check.
+// Fetches flights from Amadeus (first run) or advances the cursor through cached
+// results (retry). Applies the hotel budget check on every run.
 
 const BUDGET_BASELINE_EUR = 800;
 
 async function plan_travel_node(state: State): Promise<Partial<State>> {
   const match = state.itinerary?.match;
 
-  // Derive dates from match kickoff: arrive day before, leave 2 days after
-  const kickoff = match ? new Date(match.kickoffUtc) : new Date('2026-05-10');
-  const arrivalDate = new Date(kickoff);
-  arrivalDate.setDate(arrivalDate.getDate() - 1);
+  // Guard: match must exist to derive travel dates
+  if (!match) {
+    return {
+      validation_errors: ['No match data available — cannot plan travel'],
+      attempt_count: 3, // exit retry loop
+    };
+  }
+
+  // ── Date derivation ────────────────────────────────────────────────────────
+  const kickoff = new Date(match.kickoffUtc);
+  const matchEndMs = kickoff.getTime() + 105 * 60 * 1000; // kickoff + 105 min
+
   const departureDate = new Date(kickoff);
-  departureDate.setDate(departureDate.getDate() + 2);
+  departureDate.setDate(departureDate.getDate() - 1); // arrive 1 day before
+  const returnDate = new Date(matchEndMs);
+  returnDate.setDate(returnDate.getDate() + 1); // depart 1 day after match end
 
-  const flightDateStr = arrivalDate.toISOString().slice(0, 10);
-  const returnDateStr = departureDate.toISOString().slice(0, 10);
-  const city = match?.venue.includes('Bernabéu') ? 'Madrid' : 'Barcelona';
+  const departureDateStr = departureDate.toISOString().slice(0, 10);
+  const returnDateStr = returnDate.toISOString().slice(0, 10);
 
-  const flightRaw = await searchFlightsTool.invoke({
-    origin: state.user_preferences.origin_city,
-    destination: city,
-    date: flightDateStr,
-    return_date: returnDateStr,
-  });
-  const flight = JSON.parse(extractToolString(flightRaw)) as RawFlightOption;
+  // ── IATA codes ─────────────────────────────────────────────────────────────
+  const originGeo = await geocodeVenue(state.user_preferences.origin_city);
+  const originIata = originGeo?.nearestAirportCode ?? 'UNKNOWN';
+  const destinationIata = match.nearestAirportCode ?? 'UNKNOWN';
+
+  // ── Flight selection ───────────────────────────────────────────────────────
+  let flightResults = state.flight_results;
+  let cursor = state.flight_results_cursor;
+
+  if (flightResults === null) {
+    // First run — fetch from Amadeus and cache results
+    try {
+      flightResults = await searchRoundTrip({
+        originIata,
+        destinationIata,
+        departureDateUtc: departureDateStr,
+        returnDateUtc: returnDateStr,
+        adults: 1,
+      });
+    } catch (err) {
+      console.error('[plan_travel_node] Amadeus search failed:', err);
+      const detail =
+        err &&
+        typeof err === 'object' &&
+        'description' in err &&
+        Array.isArray((err as { description: unknown }).description)
+          ? ((err as { description: Array<{ detail?: string }> }).description[0]?.detail ?? 'unknown error')
+          : String(err);
+      return {
+        flight_results: [],
+        flight_results_cursor: 0,
+        validation_errors: [`Flight search failed — ${detail}`],
+        itinerary: {
+          match: state.itinerary?.match ?? null,
+          flight: null,
+          hotel: state.itinerary?.hotel ?? null,
+        },
+        attempt_count: 3, // exit retry loop
+      };
+    }
+    cursor = 0;
+  } else {
+    // Retry — shouldRetryOrFinish already decided to loop back, advance cursor
+    cursor += 1;
+  }
+
+  // ── Cursor exhaustion ──────────────────────────────────────────────────────
+  if (flightResults.length === 0 || cursor >= flightResults.length) {
+    console.warn('[plan_travel_node] NO_VALID_FLIGHTS — cursor exhausted at index', cursor);
+    return {
+      flight_results: flightResults,
+      flight_results_cursor: cursor,
+      itinerary: {
+        match: state.itinerary?.match ?? null,
+        flight: null,
+        hotel: state.itinerary?.hotel ?? null,
+      },
+      attempt_count: state.attempt_count + 1,
+    };
+  }
+
+  // ── Map FlightOption → RawFlightOption ────────────────────────────────────
+  const chosen = flightResults[cursor];
+  const pricePerLeg = chosen.totalPriceUSD / 2; // TODO: USD→EUR conversion
+
+  const flight: RawFlightOption = {
+    outbound: {
+      origin: chosen.outbound.origin,
+      destination: chosen.outbound.destination,
+      departureUtc: chosen.outbound.departureUtc,
+      arrivalUtc: chosen.outbound.arrivalUtc,
+      airline: `${chosen.outbound.carrierCode} ${chosen.outbound.flightNumber}`,
+      direct: chosen.outbound.stops === 0,
+      priceEur: pricePerLeg,
+    },
+    inbound: {
+      origin: chosen.inbound.origin,
+      destination: chosen.inbound.destination,
+      departureUtc: chosen.inbound.departureUtc,
+      arrivalUtc: chosen.inbound.arrivalUtc,
+      airline: `${chosen.inbound.carrierCode} ${chosen.inbound.flightNumber}`,
+      direct: chosen.inbound.stops === 0,
+      priceEur: pricePerLeg,
+    },
+  };
+
+  // ── Hotel logic (unchanged) ────────────────────────────────────────────────
+  const city = match.venue?.includes('Bernabéu') ? 'Madrid' : 'Barcelona';
 
   const hotelRaw = await searchHotelsTool.invoke({
     city,
-    check_in: flightDateStr,
+    check_in: departureDateStr,
     check_out: returnDateStr,
     max_price_per_night: 120,
   });
@@ -383,6 +443,8 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
   }
 
   return {
+    flight_results: flightResults,
+    flight_results_cursor: cursor,
     itinerary: {
       match: state.itinerary?.match ?? null,
       flight,
@@ -518,6 +580,13 @@ function afterSearchMatches(state: State): 'plan_travel_node' | typeof END {
 function shouldRetryOrFinish(
   state: State,
 ): 'plan_travel_node' | 'formatter_node' {
+  // Cursor exhausted — no more cached flights to try
+  if (
+    state.flight_results !== null &&
+    state.flight_results_cursor >= state.flight_results.length
+  ) {
+    return 'formatter_node';
+  }
   const hardErrors = state.validation_errors.filter(
     (e) => !e.includes('PROVISIONAL'),
   );

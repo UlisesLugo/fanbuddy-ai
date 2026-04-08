@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev      # Start dev server at http://localhost:3000
 npm run build    # Production build
 npm run lint     # ESLint via next lint
+npm test         # Jest unit tests
 ```
 
 ## Architecture
@@ -31,16 +32,18 @@ The AI backend lives in `lib/langchain/` and is exposed via `app/api/chat/route.
 |------|---------|
 | `lib/langchain/graph.ts` | LangGraph `StateGraph` definition — all nodes, edges, and the compiled graph |
 | `lib/langchain/types.ts` | Shared TypeScript interfaces (safe to import in client components) |
+| `lib/football-data.ts` | football-data.org v4 API client — fixture search, geocoding, retry logic, telemetry |
 | `app/api/chat/route.ts` | Next.js POST handler — runs the graph, streams SSE back to the client |
 
 ### Graph topology
 
 ```
 START
-  └─► router_node  ──── plan_trip / modify_plan ──► search_matches_node
-                   └─── general_question ──────────► direct_answer_node ──► END
-
-search_matches_node ──► plan_travel_node ──► validator_node
+  └─► router_node ──► search_matches_node
+                            │
+              missing data / unsupported team ──► END  (prompt user)
+                            │
+                       plan_travel_node ──► validator_node
                                                   │
                               hard errors + attempts < 3 ──► plan_travel_node (retry)
                                                   │
@@ -53,12 +56,11 @@ search_matches_node ──► plan_travel_node ──► validator_node
 
 | Node | What it does |
 |------|-------------|
-| `router_node` | Classifies user intent (`plan_trip`, `modify_plan`, `general_question`) using `withStructuredOutput`. Routes to the planning pipeline or the direct-answer shortcut. |
-| `direct_answer_node` | Handles general questions. Passes full conversation history to the LLM so it can answer in context. Adds the AI reply to `messages` for memory. |
-| `search_matches_node` | Calls `search_matches` tool directly (no LLM routing). Populates `state.itinerary.match`. |
-| `plan_travel_node` | Calls `search_flights` + `search_hotels` tools directly. Runs a deterministic budget check and downgrades the hotel via `downgrade_hotel` if the total exceeds €800. |
-| `validator_node` | Pure TypeScript validation: arrival buffer ≥ 6 h before kickoff, departure buffer ≥ 4 h after match end, TV schedule confirmed. Writes errors to `state.validation_errors`. |
-| `formatter_node` | Assembles `FormattedItinerary` from raw state in TypeScript. Calls the LLM **once** — only to generate the natural-language `summary` string. Adds the summary to `messages`. |
+| `router_node` | Extracts `origin_city` and `favorite_team` from the user's message using `withStructuredOutput`. Merges extracted values with checkpointed preferences — null means "keep prior value". |
+| `search_matches_node` | Gates on both preferences being present. If either is missing, sets `direct_reply` with a prompt and ends early. If the team is unsupported, returns an error message. Otherwise calls `searchFixtures()` from `lib/football-data.ts` for the next 90 days, picks the nearest fixture, and geocodes the venue. |
+| `plan_travel_node` | Calls mock `search_flights` + `search_hotels` tools directly. Runs a deterministic budget check and downgrades the hotel via `downgrade_hotel` if the total exceeds €800. |
+| `validator_node` | Pure TypeScript validation: arrival buffer ≥ 6 h before kickoff, departure buffer ≥ 4 h after match end, TV schedule confirmed. Writes errors to `state.validation_errors`. **Do not modify.** |
+| `formatter_node` | Assembles `FormattedItinerary` from raw state in TypeScript. Calls the LLM **once** — only to generate the natural-language `summary` string. Adds the summary to `messages`. **Do not modify.** |
 
 ### State
 
@@ -67,17 +69,34 @@ search_matches_node ──► plan_travel_node ──► validator_node
   messages:          BaseMessage[]   // conversation history (user + AI replies only, no tool noise)
   itinerary:         ItineraryData   // raw match / flight / hotel data
   validation_errors: string[]
-  user_preferences:  { origin_city, favorite_team }
+  user_preferences:  { origin_city, favorite_team }  // persisted across turns via checkpointer
   attempt_count:     number          // retry counter; resets to 0 each new user message
   formatted:         FormattedItinerary | null
-  intent:            'plan_trip' | 'modify_plan' | 'general_question' | null
-  direct_reply:      string | null
+  direct_reply:      string | null   // set when the graph short-circuits (missing data, unsupported team)
 }
 ```
 
 ### Conversation memory
 
-The graph is compiled with a `MemorySaver` checkpointer. Each browser session generates a `thread_id` (`crypto.randomUUID()`) that is sent with every request. The `messages` field uses a concat reducer, so conversation history accumulates across turns. All planning state fields (`itinerary`, `formatted`, etc.) use the overwrite reducer and are reset to `null`/`0` at the start of each new message.
+The graph is compiled with a `MemorySaver` checkpointer. Each browser session generates a `thread_id` (`crypto.randomUUID()`) that is sent with every request. The `messages` field uses a concat reducer, so conversation history accumulates across turns. `user_preferences` also persists via the checkpointer — `router_node` only overwrites a field when the user explicitly mentions it. All other planning state fields (`itinerary`, `formatted`, etc.) use the overwrite reducer and are reset to `null`/`0` at the start of each new message.
+
+### Preference extraction
+
+`router_node` uses `withStructuredOutput` to extract `origin_city` and `favorite_team` from every message. The conversation will not advance to trip planning until both are known. `search_matches_node` prompts for whichever field is still missing:
+
+- Neither known → "Tell me which team and city…"
+- Team missing → "Which team would you like to watch?"
+- City missing → "What city are you travelling from?"
+
+### Football data
+
+`lib/football-data.ts` wraps the football-data.org v4 API:
+- `resolveTeamId(name)` — maps common team names to numeric IDs (case-insensitive)
+- `searchFixtures(teamId, dateFrom, dateTo)` — fetches `TIMED`/`SCHEDULED` matches, filters out `POSTPONED`
+- `toFanBuddyStatus(apiStatus)` — `"TIMED"` → `"CONFIRMED"`, anything else → `"PROVISIONAL"`
+- `geocodeVenue(name)` — Geoapify geocoding → `{ lat, lng, nearestAirportCode }`
+- All external calls go through `fetchWithRetry` (exponential backoff: 1 s / 2 s / 4 s, max 3 attempts) with console telemetry (`[api] ✓/✗ service GET url → status (ms, attempt N)`)
+- Auth tokens are redacted from logged URLs
 
 ### Streaming (SSE)
 
@@ -99,9 +118,17 @@ Langfuse tracing is enabled when `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY`
 
 | Flow | LLM calls |
 |------|-----------|
-| `plan_trip` | 2 — `router_node` (intent) + `formatter_node` (summary) |
-| `general_question` | 2 — `router_node` (intent) + `direct_answer_node` (reply) |
+| Data incomplete / unsupported team | 1 — `router_node` (extraction) |
+| Full `plan_trip` | 2 — `router_node` (extraction) + `formatter_node` (summary) |
 | `plan_trip` with retry | 2 + 0 per retry (retries are pure tool calls) |
+
+## Safety rules — do not change
+
+- Arrival gap: min 6 hours between flight landing and match kickoff (`validator_node`)
+- Departure gap: min 4 hours after match ends before return flight (`validator_node`)
+- Budget pressure: downgrade hotels (4★→3★) before changing flights (`plan_travel_node`)
+- Status logic: `CONFIRMED` if fixture status is `"TIMED"`, else `PROVISIONAL`
+- All timestamps must stay as ISO 8601 UTC strings — `kickoffUtc` is what `validator_node` uses for buffer math
 
 ## Styling conventions
 
