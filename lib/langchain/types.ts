@@ -100,7 +100,7 @@ export interface ItineraryData {
 export interface ChatApiRequest {
   message: string;
   thread_id: string;
-  user_preferences: {
+  user_preferences?: {
     origin_city: string;
     favorite_team: string;
   };

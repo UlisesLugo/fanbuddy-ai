@@ -65,7 +65,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     role: 'ai',
     kind: 'text',
     time: formatMessageTime(new Date()),
-    body: "Hi! I'm FanBuddy, your personal football travel assistant. To get started, tell me your origin city, your favourite team, and which match you'd like to attend — I'll take care of the rest.",
+    body: "Hi! I'm FanBuddy, your personal football travel assistant. Tell me where you're travelling from and which team you want to watch — I'll find their next upcoming fixture and plan your trip around it.",
   },
 ];
 
@@ -315,10 +315,6 @@ export function PlanningChat() {
           body: JSON.stringify({
             message: trimmed,
             thread_id: threadId,
-            user_preferences: {
-              origin_city: 'London',
-              favorite_team: 'Real Madrid',
-            },
           }),
         });
 
@@ -570,7 +566,7 @@ export function PlanningChat() {
                         onKeyDown={handleKeyDown}
                         disabled={isLoading}
                         className="w-full rounded-2xl border-none bg-landing-container-low py-4 pl-6 pr-16 text-sm text-landing-on-surface placeholder:text-landing-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-landing-primary/20 disabled:opacity-50"
-                        placeholder="Ask FanBuddy anything about your trip..."
+                        placeholder="e.g. I'm from Berlin and want to watch Barcelona"
                         type="text"
                         autoComplete="off"
                         aria-label="Message"

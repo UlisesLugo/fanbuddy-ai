@@ -14,7 +14,7 @@ export const maxDuration = 60;
 // Status message shown to the user after each node in the pipeline completes.
 // Keys are node names; the message describes what's happening NEXT.
 const NODE_STATUS: Record<string, string> = {
-  router_node: '', // dynamic — set based on resolved intent below
+  router_node: 'Searching for upcoming fixtures...',
   search_matches_node: 'Planning your travel...',
   plan_travel_node: 'Validating your itinerary...',
   validator_node: 'Finalizing your trip...',
@@ -33,19 +33,11 @@ export async function POST(request: Request) {
     : null;
 
   const body = (await request.json()) as Partial<ChatApiRequest>;
-  const { message, thread_id, user_preferences } = body;
+  const { message, thread_id } = body;
 
-  if (
-    !message ||
-    !thread_id ||
-    !user_preferences?.origin_city ||
-    !user_preferences?.favorite_team
-  ) {
+  if (!message || !thread_id) {
     return Response.json(
-      {
-        reply: 'Missing required fields: message, thread_id, and user_preferences.',
-        itinerary: null,
-      },
+      { reply: 'Missing required fields: message and thread_id.', itinerary: null },
       { status: 400 },
     );
   }
@@ -69,15 +61,13 @@ export async function POST(request: Request) {
         // Initial status before the graph starts
         send({ type: 'status', message: 'Analyzing your request...' });
 
-        // Reset planning state each call; messages accumulate via reducer
+        // Reset planning state each call; messages + user_preferences accumulate via checkpointer
         const initialState = {
           messages: [new HumanMessage(message)],
-          user_preferences,
           itinerary: null,
           validation_errors: [],
           attempt_count: 0,
           formatted: null,
-          intent: null,
           direct_reply: null,
         };
 
@@ -102,14 +92,7 @@ export async function POST(request: Request) {
           }
 
           // Emit status based on which node just finished
-          if (nodeName === 'router_node') {
-            const intent = update.intent as string;
-            if (intent === 'plan_trip' || intent === 'modify_plan') {
-              send({ type: 'status', message: 'Searching for upcoming fixtures...' });
-            } else {
-              send({ type: 'status', message: 'Thinking...' });
-            }
-          } else if (NODE_STATUS[nodeName]) {
+          if (NODE_STATUS[nodeName]) {
             send({ type: 'status', message: NODE_STATUS[nodeName] });
           }
         }
