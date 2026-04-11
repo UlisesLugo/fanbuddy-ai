@@ -51,7 +51,7 @@ export interface FlightSearchParams {
 // Lazy factory — avoids throwing at module-load time when env vars are absent
 // (e.g. during Jest runs of unrelated test files).
 
-function getClient(): Amadeus {
+export function getClient(): Amadeus {
   const clientId = process.env.AMADEUS_API_KEY;
   const clientSecret = process.env.AMADEUS_API_SECRET;
   if (!clientId || !clientSecret) {
