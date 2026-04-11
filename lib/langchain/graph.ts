@@ -247,11 +247,14 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
     return { direct_reply: reply, messages: [new AIMessage(reply)] };
   }
 
-  // Search window: today → 90 days out
+  // Search window: 2 days from now → 90 days out
+  // Matches sooner than 2 days away cannot be planned (flight lead-time constraint).
   const today = new Date();
+  const minPlanDate = new Date(today);
+  minPlanDate.setDate(today.getDate() + 2);
   const ninetyDaysOut = new Date(today);
   ninetyDaysOut.setDate(today.getDate() + 90);
-  const dateFrom = today.toISOString().slice(0, 10);
+  const dateFrom = minPlanDate.toISOString().slice(0, 10);
   const dateTo = ninetyDaysOut.toISOString().slice(0, 10);
 
   try {
