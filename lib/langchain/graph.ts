@@ -1,6 +1,5 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 import { AIMessage, BaseMessage } from '@langchain/core/messages';
-import { tool } from '@langchain/core/tools';
 import { Annotation, END, MemorySaver, START, StateGraph } from '@langchain/langgraph';
 import { z } from 'zod';
 
@@ -80,40 +79,6 @@ const GraphState = Annotation.Root({
 });
 
 type State = typeof GraphState.State;
-
-// ─── Mock Tools ───────────────────────────────────────────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const searchMatchesTool = tool(
-  async ({ team }: { team: string; date_from: string; date_to: string }) => {
-    const isHomeTeamMadrid =
-      team.toLowerCase().includes('madrid') ||
-      team.toLowerCase().includes('real');
-    const fixture: RawMatchFixture = {
-      id: 'match-001',
-      league: 'La Liga',
-      matchday: 'Matchday 32',
-      homeTeam: isHomeTeamMadrid ? 'REAL MADRID' : 'BARCELONA',
-      awayTeam: isHomeTeamMadrid ? 'BARCELONA' : 'REAL MADRID',
-      venue: 'Santiago Bernabéu',
-      kickoffUtc: '2026-05-10T21:00:00Z',
-      ticketPriceEur: 245,
-      tvConfirmed: false,
-    };
-    return JSON.stringify(fixture);
-  },
-  {
-    name: 'search_matches',
-    description:
-      'Search upcoming match fixtures for a football team within a date range.',
-    schema: z.object({
-      team: z.string().describe('The team name to search fixtures for'),
-      date_from: z.string().describe('Start date in ISO format YYYY-MM-DD'),
-      date_to: z.string().describe('End date in ISO format YYYY-MM-DD'),
-    }),
-  },
-);
-
 
 // ─── Node: router_node ────────────────────────────────────────────────────────
 // Classifies user intent AND extracts travel preferences from the message in a
@@ -260,6 +225,10 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
     return {
       validation_errors: ['No match data available — cannot plan travel'],
       attempt_count: 3, // exit retry loop
+      flight_results: null,
+      flight_results_cursor: 0,
+      hotel_results: null,
+      hotel_results_cursor: 0,
     };
   }
 
@@ -414,6 +383,9 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
 
   for (let hc = 0; hc < hotelResults.length; hc++) {
     const h = hotelResults[hc];
+    // TODO: h.totalPriceUSD is in USD (Amadeus returns USD); flightTotalEur is
+    // approximated from USD/2 with no conversion. Budget comparison mixes currencies.
+    // Wire a real USD→EUR rate before shipping to production.
     if (flightTotalEur + h.totalPriceUSD <= BUDGET_BASELINE_EUR) {
       selectedHotel = {
         name: h.name,
