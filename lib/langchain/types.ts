@@ -88,6 +88,7 @@ export interface RawHotelOption {
   nights: number;
   pricePerNightEur: number;
   totalEur: number;
+  wasDowngraded: boolean; // true when budget pressure caused a lower-ranked hotel to be selected
 }
 
 export interface ItineraryData {

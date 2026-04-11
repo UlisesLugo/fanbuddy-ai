@@ -395,6 +395,7 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
         nights: h.nights,
         pricePerNightEur: h.pricePerNight,
         totalEur: h.totalPriceUSD,
+        wasDowngraded: hc > 0, // true when budget pressure forced skipping higher-ranked options
       };
       finalHotelCursor = hc;
       break;
@@ -502,7 +503,7 @@ async function formatter_node(state: State): Promise<Partial<State>> {
   const matchTicketEur = itinerary.match.ticketPriceEur;
   const stayEur = itinerary.hotel.totalEur;
   const totalEur = flightsEur + matchTicketEur + stayEur;
-  const wasDowngraded = itinerary.hotel.name.toLowerCase().includes('moderno');
+  const wasDowngraded = itinerary.hotel.wasDowngraded;
 
   // Single LLM call — only for the natural-language summary
   const summaryResponse = await model.invoke(
