@@ -100,24 +100,8 @@ export async function searchHotels(
   }
 
   // Map offers → HotelOption
-  const hotels: HotelOption[] = items.flatMap((item: {
-    hotel: {
-      hotelId: string;
-      name: string;
-      rating?: string;
-      amenities?: string[];
-      latitude?: number;
-      longitude?: number;
-    };
-    offers?: Array<{
-      id: string;
-      price: { total: string; currency: string };
-      policies?: {
-        cancellations?: Array<{ deadline?: string; amount?: string }>;
-      };
-    }>;
-    available?: boolean;
-  }) => {
+  const now = new Date();
+  const hotels: HotelOption[] = items.flatMap((item) => {
     const offer = item.offers?.[0];
     if (!offer) return [];
 
@@ -128,7 +112,6 @@ export async function searchHotels(
     const totalPriceUSD = parseFloat(offer.price.total);
     const pricePerNight = nights > 0 ? totalPriceUSD / nights : totalPriceUSD;
 
-    const now = new Date();
     const cancellable = (offer.policies?.cancellations ?? []).some(
       (c: { deadline?: string }) => c.deadline !== undefined && new Date(c.deadline) > now,
     );
@@ -152,6 +135,10 @@ export async function searchHotels(
       },
     ];
   });
+
+  if (hotels.length === 0) {
+    throw new Error('NO_HOTEL_AVAILABILITY');
+  }
 
   // Filter by minimum star rating
   const filtered = hotels.filter((h) => h.starRating >= minStarRating);

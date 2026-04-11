@@ -244,6 +244,30 @@ describe('searchHotels', () => {
     ).rejects.toThrow('NO_HOTEL_AVAILABILITY');
   });
 
+  // ─── Test 8b: all step 2 items have no offers → throws NO_HOTEL_AVAILABILITY ──
+
+  it('throws NO_HOTEL_AVAILABILITY when all step 2 items have no offers', async () => {
+    mockHotelsByCity.mockResolvedValue(makeHotelListResponse(['H1']));
+    mockHotelOffersSearch.mockResolvedValue({
+      data: [
+        {
+          hotel: { hotelId: 'H1', name: 'Hotel H1' },
+          offers: [], // empty offers array — no available rooms
+          available: false,
+        },
+      ],
+    });
+
+    await expect(
+      searchHotels({
+        destinationIata: 'MAD',
+        checkInDate: '2026-05-09',
+        checkOutDate: '2026-05-12',
+        adults: 1,
+      }),
+    ).rejects.toThrow('NO_HOTEL_AVAILABILITY');
+  });
+
   // ─── Test 9: passes correct params to Amadeus Step 1 ─────────────────────────
 
   it('passes correct params to Amadeus hotel list call', async () => {
