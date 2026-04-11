@@ -1,4 +1,4 @@
-import { searchHotels, type HotelOption } from '../amadeus-hotels';
+import { searchHotels } from '../amadeus-hotels';
 
 // ─── Mock: amadeus SDK ────────────────────────────────────────────────────────
 

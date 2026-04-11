@@ -127,6 +127,7 @@ export async function searchRoundTrip(
 
 export async function confirmOffer(
   offerId: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _flightOffers: unknown[],
 ): Promise<{ confirmed: boolean; offerId: string }> {
   console.log(`[amadeus] confirmOffer stub called for offerId=${offerId}`);
