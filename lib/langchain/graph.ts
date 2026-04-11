@@ -1,6 +1,12 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 import { AIMessage, BaseMessage } from '@langchain/core/messages';
-import { Annotation, END, MemorySaver, START, StateGraph } from '@langchain/langgraph';
+import {
+  Annotation,
+  END,
+  MemorySaver,
+  START,
+  StateGraph,
+} from '@langchain/langgraph';
 import { z } from 'zod';
 
 import {
@@ -118,7 +124,8 @@ User message: "${lastMessage.content}"`,
   return {
     user_preferences: {
       origin_city: result.origin_city ?? state.user_preferences.origin_city,
-      favorite_team: result.favorite_team ?? state.user_preferences.favorite_team,
+      favorite_team:
+        result.favorite_team ?? state.user_preferences.favorite_team,
     },
   };
 }
@@ -131,7 +138,8 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
 
   // Gate: ask for whichever piece of data is still missing
   if (!teamName && !origin_city) {
-    const reply = "To get started, tell me which team you'd like to watch and the city you're travelling from.";
+    const reply =
+      "To get started, tell me which team you'd like to watch and the city you're travelling from.";
     return { direct_reply: reply, messages: [new AIMessage(reply)] };
   }
   if (!teamName) {
@@ -176,7 +184,24 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
     // Pick the nearest upcoming fixture
     const fixture = fixtures[0];
     const venueName = fixture.venue ?? `${fixture.homeTeam.name} Stadium`;
-    const geo = await geocodeVenue(venueName);
+    const [geo, originGeo] = await Promise.all([
+      geocodeVenue(venueName),
+      geocodeVenue(origin_city),
+    ]);
+
+    // Guardrail: if the match venue is in the user's home city, trip planning
+    // makes no sense. Compare nearest airport codes — same IATA code = same city.
+    if (
+      geo?.nearestAirportCode &&
+      originGeo?.nearestAirportCode &&
+      geo.nearestAirportCode === originGeo.nearestAirportCode
+    ) {
+      const reply =
+        `The next ${fixture.homeTeam.name} match is at ${venueName} — ` +
+        `that's right in ${origin_city}! No travel needed for a home game. ` +
+        `Would you like to plan a trip to an away match instead?`;
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
 
     const match: RawMatchFixture = {
       id: String(fixture.id),
@@ -188,7 +213,13 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
       kickoffUtc: fixture.utcDate, // ISO 8601 UTC — required by validator_node
       ticketPriceEur: 0, // placeholder; tickets API not yet integrated
       tvConfirmed: toFanBuddyStatus(fixture.status) === 'CONFIRMED',
-      ...(geo ? { lat: geo.lat, lng: geo.lng, nearestAirportCode: geo.nearestAirportCode } : {}),
+      ...(geo
+        ? {
+            lat: geo.lat,
+            lng: geo.lng,
+            nearestAirportCode: geo.nearestAirportCode,
+          }
+        : {}),
     };
 
     return {
