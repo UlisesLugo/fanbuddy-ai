@@ -73,7 +73,7 @@ Replace the Amadeus SDK flight and hotel integrations with the Duffel REST API (
 - `totalPriceUSD` ← `parseFloat(offer.total_amount)` (currency may vary by route)
 - `currency` ← `offer.total_currency`
 - `validatingCarrier` ← `offer.owner.iata_code`
-- `seatsRemaining` ← `offer.available_services` count or `null`
+- `seatsRemaining` ← `null` (Duffel v2 offers do not expose a seat count at the offer level)
 
 `buildLeg()` maps `slice.segments[0].departing_at` → `departureUtc` (normalized to UTC ISO 8601), `slice.segments[-1].arriving_at` → `arrivalUtc`, duration from segment sum, stops from `segments.length - 1`.
 
