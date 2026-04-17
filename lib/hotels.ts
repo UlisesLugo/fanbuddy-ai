@@ -1,25 +1,23 @@
-// ─── Internal Duffel types ─────────────────────────────────────────────────────
+// ─── Internal LiteAPI types ───────────────────────────────────────────────────
 
-type DuffelStaysResult = {
-  accommodation: {
-    id: string;
-    name: string;
-    rating: number | null;
-    amenities: Array<{ type: string }>;
-    location: {
-      geographic_coordinates: {
-        latitude: number;
-        longitude: number;
-      };
+type LiteApiHotel = {
+  id: string;
+  name: string;
+  starRating: number | null;
+  location: { latitude: number; longitude: number };
+  distance: number | null;
+};
+
+type LiteApiRate = {
+  hotelId: string;
+  cheapestRate: {
+    retailRate: {
+      total: Array<{ amount: number; currency: string }>;
     };
-  };
-  cheapest_rate: {
-    total_amount: string;
-    total_currency: string;
-    cancellation_policy: {
+    cancellationPolicies: {
       refundable: boolean;
     };
-  };
+  } | null;
 };
 
 // ─── Exported types ────────────────────────────────────────────────────────────
@@ -28,13 +26,13 @@ export interface HotelOption {
   id: string;
   name: string;
   starRating: number;           // 1–5; defaults to 3 if API omits the field
-  totalPriceUSD: number;        // full stay price (currency per route; field name kept for interface compat)
+  totalPriceUSD: number;        // full stay price (field name kept for interface compat)
   pricePerNight: number;
   currency: string;
   checkInDate: string;          // YYYY-MM-DD
   checkOutDate: string;         // YYYY-MM-DD
   nights: number;
-  distanceFromVenueKm: null;    // not available from Duffel
+  distanceFromVenueKm: number | null;  // km from venue; null if API omits
   amenities: string[];
   cancellable: boolean;
   latitude: number | null;
@@ -53,12 +51,11 @@ export interface HotelSearchParams {
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
 
-function getDuffelHeaders(): Record<string, string> {
-  const token = process.env.DUFFEL_ACCESS_TOKEN;
-  if (!token) throw new Error('DUFFEL_ACCESS_TOKEN must be set');
+function getLiteApiHeaders(): Record<string, string> {
+  const key = process.env.LITEAPI_API_KEY;
+  if (!key) throw new Error('LITEAPI_API_KEY must be set');
   return {
-    Authorization: `Bearer ${token}`,
-    'Duffel-Version': 'v2',
+    'X-API-Key': key,
     'Content-Type': 'application/json',
   };
 }
@@ -78,79 +75,97 @@ function calculateNights(checkInDate: string, checkOutDate: string): number {
 export async function searchHotels(
   params: HotelSearchParams,
 ): Promise<HotelOption[]> {
-  const headers = getDuffelHeaders();
+  const headers = getLiteApiHeaders();
   const minStarRating = params.minStarRating ?? 3;
   const maxResults = params.maxResults ?? 20;
   const nights = calculateNights(params.checkInDate, params.checkOutDate);
 
-  const res = await fetch('https://api.duffel.com/stays/search', {
+  // ── Step 1: Get hotels near coordinates ─────────────────────────────────────
+  const hotelsUrl =
+    `https://api.liteapi.travel/v3.0/data/hotels` +
+    `?latitude=${params.lat}&longitude=${params.lng}&radius=5&limit=20`;
+  const step1Start = Date.now();
+  const hotelsRes = await fetch(hotelsUrl, { headers });
+  console.log(
+    `[api] ${hotelsRes.ok ? '✓' : '✗'} liteapi GET /data/hotels → ${hotelsRes.status} (${Date.now() - step1Start}ms)`,
+  );
+
+  if (!hotelsRes.ok) throw new Error('NO_HOTEL_AVAILABILITY');
+
+  const hotelsData = await hotelsRes.json();
+  const hotels: LiteApiHotel[] = hotelsData.data ?? [];
+
+  if (hotels.length === 0) throw new Error('NO_HOTEL_AVAILABILITY');
+
+  const hotelIds = hotels.map((h) => h.id);
+
+  // ── Step 2: Get rates for those hotels ──────────────────────────────────────
+  const ratesUrl = 'https://api.liteapi.travel/v3.0/rates';
+  const step2Start = Date.now();
+  const ratesRes = await fetch(ratesUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      data: {
-        check_in_date: params.checkInDate,
-        check_out_date: params.checkOutDate,
-        rooms: 1,
-        guests: Array.from({ length: params.adults }, () => ({ type: 'adult' })),
-        location: {
-          geographic_coordinates: {
-            latitude: params.lat,
-            longitude: params.lng,
-            radius: 5,
-            radius_unit: 'km',
-          },
-        },
-      },
+      hotelIds,
+      occupancies: [{ adults: params.adults }],
+      checkin: params.checkInDate,
+      checkout: params.checkOutDate,
+      currency: 'EUR',
     }),
   });
+  console.log(
+    `[api] ${ratesRes.ok ? '✓' : '✗'} liteapi POST /rates → ${ratesRes.status} (${Date.now() - step2Start}ms)`,
+  );
 
-  if (!res.ok) {
-    throw new Error('NO_HOTEL_AVAILABILITY');
-  }
+  if (!ratesRes.ok) throw new Error('NO_HOTEL_AVAILABILITY');
 
-  const data = await res.json();
-  const results: DuffelStaysResult[] = data.data?.results ?? [];
+  const ratesData = await ratesRes.json();
+  const rates: LiteApiRate[] = ratesData.data ?? [];
 
-  if (results.length === 0) {
-    throw new Error('NO_HOTEL_AVAILABILITY');
-  }
+  // Build a lookup map from hotelId → rate entry
+  const rateMap = new Map<string, LiteApiRate>(rates.map((r) => [r.hotelId, r]));
 
-  const hotels: HotelOption[] = results.map((r) => {
-    const acc = r.accommodation;
-    const rate = r.cheapest_rate;
+  // Merge hotel info + rates — drop hotels with no available rate
+  const hotelOptions: HotelOption[] = [];
+  for (const hotel of hotels) {
+    const rateEntry = rateMap.get(hotel.id);
+    if (!rateEntry?.cheapestRate) continue;
+
+    const total = rateEntry.cheapestRate.retailRate.total[0];
+    if (!total) continue;
+
     const starRating =
-      acc.rating !== null && !isNaN(acc.rating) ? acc.rating : 3;
-    const totalPriceUSD = parseFloat(rate.total_amount);
-    const pricePerNight = nights > 0 ? totalPriceUSD / nights : totalPriceUSD;
+      hotel.starRating !== null && !isNaN(hotel.starRating as number)
+        ? (hotel.starRating as number)
+        : 3;
 
-    return {
-      id: acc.id,
-      name: acc.name,
+    hotelOptions.push({
+      id: hotel.id,
+      name: hotel.name,
       starRating,
-      totalPriceUSD,
-      pricePerNight,
-      currency: rate.total_currency,
+      totalPriceUSD: total.amount,
+      pricePerNight: nights > 0 ? total.amount / nights : total.amount,
+      currency: total.currency,
       checkInDate: params.checkInDate,
       checkOutDate: params.checkOutDate,
       nights,
-      distanceFromVenueKm: null,
-      amenities: acc.amenities.map((a) => a.type),
-      cancellable: rate.cancellation_policy.refundable,
-      latitude: acc.location.geographic_coordinates.latitude,
-      longitude: acc.location.geographic_coordinates.longitude,
-    };
-  });
+      distanceFromVenueKm: hotel.distance ?? null,
+      amenities: [],
+      cancellable: rateEntry.cheapestRate.cancellationPolicies.refundable,
+      latitude: hotel.location.latitude,
+      longitude: hotel.location.longitude,
+    });
+  }
 
-  // Sort: starRating DESC, then totalPriceUSD ASC
-  const filtered = hotels.filter((h) => h.starRating >= minStarRating);
+  if (hotelOptions.length === 0) throw new Error('NO_HOTEL_AVAILABILITY');
+
+  const filtered = hotelOptions.filter((h) => h.starRating >= minStarRating);
   filtered.sort((a, b) => {
     if (b.starRating !== a.starRating) return b.starRating - a.starRating;
     return a.totalPriceUSD - b.totalPriceUSD;
   });
 
-  if (filtered.length === 0) {
-    throw new Error('NO_HOTEL_AVAILABILITY');
-  }
+  if (filtered.length === 0) throw new Error('NO_HOTEL_AVAILABILITY');
 
   return filtered.slice(0, maxResults);
 }
