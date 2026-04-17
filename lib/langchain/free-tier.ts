@@ -16,11 +16,10 @@ export interface FixtureSummary {
  */
 export function formatFixtureList(fixtures: FixtureSummary[]): string {
   const lines = fixtures.map((f, i) => {
-    const date = new Date(f.kickoffUtc).toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      timeZone: 'UTC',
-    });
+    const parsed = new Date(f.kickoffUtc);
+    const date = isNaN(parsed.getTime())
+      ? f.kickoffUtc
+      : parsed.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
     const venue = f.venue ? ` (${f.venue})` : '';
     return `${i + 1}. ${f.homeTeam} vs ${f.awayTeam} — ${date}, ${f.competition}${venue}`;
   });
@@ -90,8 +89,8 @@ export function buildTransportUrl(
   checkIn: string,
   checkOut: string,
 ): string {
-  const origin = originCity.toLowerCase().replace(/\s+/g, '+');
-  const dest = matchCity.toLowerCase().replace(/\s+/g, '+');
+  const origin = encodeURIComponent(originCity.toLowerCase()).replace(/%20/g, '+');
+  const dest = encodeURIComponent(matchCity.toLowerCase()).replace(/%20/g, '+');
   const from = formatDateForGoogle(checkIn);
   const to = formatDateForGoogle(checkOut);
   return `https://www.google.com/search?q=${origin}+to+${dest}+${from}+to+${to}`;
