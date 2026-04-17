@@ -85,9 +85,11 @@ export async function searchHotels(
     `https://api.liteapi.travel/v3.0/data/hotels` +
     `?latitude=${params.lat}&longitude=${params.lng}&radius=5000&limit=20`;
   const step1Start = Date.now();
+  console.log(`[liteapi] GET /data/hotels lat=${params.lat} lng=${params.lng} radius=5000m limit=20`);
   const hotelsRes = await fetch(hotelsUrl, { headers });
+  const step1Ms = Date.now() - step1Start;
   console.log(
-    `[api] ${hotelsRes.ok ? '✓' : '✗'} liteapi GET /data/hotels → ${hotelsRes.status} (${Date.now() - step1Start}ms)`,
+    `[liteapi] ${hotelsRes.ok ? '✓' : '✗'} GET /data/hotels → ${hotelsRes.status} (${step1Ms}ms)`,
   );
 
   if (!hotelsRes.ok) throw new Error('NO_HOTEL_AVAILABILITY');
@@ -95,6 +97,7 @@ export async function searchHotels(
   const hotelsData = await hotelsRes.json();
   const hotels: LiteApiHotel[] = hotelsData.data ?? [];
 
+  console.log(`[liteapi] /data/hotels returned ${hotels.length} hotel(s)`);
   if (hotels.length === 0) throw new Error('NO_HOTEL_AVAILABILITY');
 
   const hotelIds = hotels.map((h) => h.id);
@@ -102,6 +105,9 @@ export async function searchHotels(
   // ── Step 2: Get rates for those hotels ──────────────────────────────────────
   const ratesUrl = 'https://api.liteapi.travel/v3.0/rates';
   const step2Start = Date.now();
+  console.log(
+    `[liteapi] POST /rates hotelIds=[${hotelIds.join(', ')}] checkin=${params.checkInDate} checkout=${params.checkOutDate} adults=${params.adults} currency=EUR`,
+  );
   const ratesRes = await fetch(ratesUrl, {
     method: 'POST',
     headers,
@@ -113,16 +119,21 @@ export async function searchHotels(
       currency: 'EUR',
     }),
   });
+  const step2Ms = Date.now() - step2Start;
   console.log(
-    `[api] ${ratesRes.ok ? '✓' : '✗'} liteapi POST /rates → ${ratesRes.status} (${Date.now() - step2Start}ms)`,
+    `[liteapi] ${ratesRes.ok ? '✓' : '✗'} POST /rates → ${ratesRes.status} (${step2Ms}ms)`,
   );
 
   if (!ratesRes.ok) throw new Error('NO_HOTEL_AVAILABILITY');
 
   const ratesText = await ratesRes.text();
-  if (!ratesText) throw new Error('NO_HOTEL_AVAILABILITY');
+  if (!ratesText) {
+    console.log('[liteapi] POST /rates returned empty body — no inventory for requested dates');
+    throw new Error('NO_HOTEL_AVAILABILITY');
+  }
   const ratesData = JSON.parse(ratesText);
   const rates: LiteApiRate[] = ratesData.data ?? [];
+  console.log(`[liteapi] POST /rates returned ${rates.length} hotel(s) with rates`);
 
   // Build a lookup map from hotelId → rate entry
   const rateMap = new Map<string, LiteApiRate>(
