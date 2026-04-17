@@ -98,7 +98,9 @@ export async function searchRoundTrip(
   const limit = params.maxResults ?? 10;
 
   // Step 1 — Create offer request
-  const offerRequestRes = await fetch('https://api.duffel.com/air/offer_requests', {
+  const offerRequestUrl = 'https://api.duffel.com/air/offer_requests';
+  const offerRequestStart = Date.now();
+  const offerRequestRes = await fetch(offerRequestUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -121,6 +123,9 @@ export async function searchRoundTrip(
       },
     }),
   });
+  console.log(
+    `[api] ${offerRequestRes.ok ? '✓' : '✗'} duffel POST ${offerRequestUrl} → ${offerRequestRes.status} (${Date.now() - offerRequestStart}ms)`,
+  );
 
   if (!offerRequestRes.ok) {
     throw new Error('NO_FLIGHTS_AVAILABLE');
@@ -130,9 +135,11 @@ export async function searchRoundTrip(
   const offerRequestId: string = offerRequestData.data.id;
 
   // Step 2 — Fetch offers (sorted cheapest first by Duffel)
-  const offersRes = await fetch(
-    `https://api.duffel.com/air/offers?offer_request_id=${offerRequestId}&sort=total_amount&limit=${limit}`,
-    { method: 'GET', headers },
+  const offersUrl = `https://api.duffel.com/air/offers?offer_request_id=${offerRequestId}&sort=total_amount&limit=${limit}`;
+  const offersStart = Date.now();
+  const offersRes = await fetch(offersUrl, { method: 'GET', headers });
+  console.log(
+    `[api] ${offersRes.ok ? '✓' : '✗'} duffel GET ${offersUrl} → ${offersRes.status} (${Date.now() - offersStart}ms)`,
   );
 
   if (!offersRes.ok) {
