@@ -29,6 +29,8 @@ import type {
   UserPreferences,
 } from './types';
 
+import { formatFixtureList, type FixtureSummary } from './free-tier';
+
 // ─── Model ────────────────────────────────────────────────────────────────────
 
 const model = new ChatAnthropic({
@@ -160,6 +162,122 @@ User message: "${lastMessage.content}"`,
     } as UserPreferences,
     // wants_date_recommendation will be added to GraphState in Task 9
     ...({ wants_date_recommendation: result.wants_date_recommendation } as any),
+  };
+}
+
+// ─── Node: list_matches_node ──────────────────────────────────────────────────
+// Shows the next 5 upcoming fixtures when no match is selected yet.
+// When a match is already selected, geocodes the venue and sets itinerary.match.
+
+async function list_matches_node(state: State): Promise<Partial<State>> {
+  const { favorite_team: teamName, selected_match_id } = state.user_preferences as UserPreferences;
+
+  if (!teamName) {
+    const reply = "Which football team would you like to watch? I'll find their upcoming fixtures.";
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const teamId = resolveTeamId(teamName);
+  if (!teamId) {
+    const reply = `Sorry, ${teamName} isn't supported yet. Try a club like Real Madrid, Barcelona, Liverpool, or Manchester City.`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const today = new Date();
+  const minPlanDate = new Date(today);
+  minPlanDate.setDate(today.getDate() + 2);
+  const ninetyDaysOut = new Date(today);
+  ninetyDaysOut.setDate(today.getDate() + 90);
+  const dateFrom = minPlanDate.toISOString().slice(0, 10);
+  const dateTo = ninetyDaysOut.toISOString().slice(0, 10);
+
+  let fixtures;
+  try {
+    fixtures = await searchFixtures(teamId, dateFrom, dateTo);
+  } catch (err) {
+    console.error('[list_matches_node] football-data.org call failed:', err);
+    const reply = 'I had trouble fetching fixtures right now. Please try again in a moment.';
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const upcoming = fixtures.slice(0, 5);
+
+  if (upcoming.length === 0) {
+    const reply = `No upcoming fixtures found for ${teamName} in the next 90 days.`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  // No match selected yet — return the numbered list
+  if (!selected_match_id) {
+    const summaries: FixtureSummary[] = upcoming.map((f) => ({
+      homeTeam: f.homeTeam.name,
+      awayTeam: f.awayTeam.name,
+      kickoffUtc: f.utcDate,
+      competition: f.competition.name,
+      venue: f.venue,
+    }));
+    const reply = formatFixtureList(summaries);
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  // Match selected — resolve by 1-based index
+  const index = parseInt(selected_match_id, 10) - 1;
+  if (isNaN(index) || index < 0 || index >= upcoming.length) {
+    const summaries: FixtureSummary[] = upcoming.map((f) => ({
+      homeTeam: f.homeTeam.name,
+      awayTeam: f.awayTeam.name,
+      kickoffUtc: f.utcDate,
+      competition: f.competition.name,
+      venue: f.venue,
+    }));
+    const reply =
+      `I didn't catch which match you meant. Here are the options again:\n\n` +
+      formatFixtureList(summaries);
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const fixture = upcoming[index];
+  const venueName = fixture.venue ?? `${fixture.homeTeam.name} Stadium`;
+  const [venueGeo, originGeo] = await Promise.all([
+    geocodeVenue(venueName),
+    geocodeVenue(state.user_preferences.origin_city || venueName),
+  ]);
+
+  // Same-city guardrail
+  if (
+    venueGeo?.nearestAirportCode &&
+    originGeo?.nearestAirportCode &&
+    venueGeo.nearestAirportCode === originGeo.nearestAirportCode
+  ) {
+    const reply =
+      `The next ${fixture.homeTeam.name} match is at ${venueName} — ` +
+      `that's right in ${state.user_preferences.origin_city}! No travel needed for a home game. ` +
+      `Would you like to plan a trip to an away match instead?`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const match: RawMatchFixture = {
+    id: String(fixture.id),
+    league: fixture.competition.name,
+    matchday: 'Matchday',
+    homeTeam: fixture.homeTeam.name,
+    awayTeam: fixture.awayTeam.name,
+    venue: venueName,
+    kickoffUtc: fixture.utcDate,
+    ticketPriceEur: 0,
+    tvConfirmed: toFanBuddyStatus(fixture.status) === 'CONFIRMED',
+    match_city: venueGeo?.city ?? venueName,
+    ...(venueGeo
+      ? { lat: venueGeo.lat, lng: venueGeo.lng, nearestAirportCode: venueGeo.nearestAirportCode }
+      : {}),
+  };
+
+  return {
+    itinerary: {
+      match,
+      flight: state.itinerary?.flight ?? null,
+      hotel: state.itinerary?.hotel ?? null,
+    },
   };
 }
 
