@@ -73,6 +73,8 @@ export interface RawMatchFixture {
   ticketPriceEur: number;
   tvConfirmed: boolean;
   nearestAirportCode?: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface RawFlightOption {

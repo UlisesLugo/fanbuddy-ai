@@ -16,8 +16,8 @@ import {
   toFanBuddyStatus,
 } from '../football-data';
 
-import { searchRoundTrip, type FlightOption } from '../amadeus-flights';
-import { searchHotels, type HotelOption } from '../amadeus-hotels';
+import { searchRoundTrip, type FlightOption } from '../flights';
+import { searchHotels, type HotelOption } from '../hotels';
 
 import type {
   FormattedItinerary,
@@ -380,14 +380,15 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
   if (hotelResults === null) {
     try {
       hotelResults = await searchHotels({
-        destinationIata,
+        lat: match.lat ?? 0,
+        lng: match.lng ?? 0,
         checkInDate: departureDateStr,
         checkOutDate: returnDateStr,
         adults: 1,
         minStarRating: 3,
       });
     } catch (err) {
-      console.error('[plan_travel_node] Amadeus hotel search failed:', err);
+      console.error('[plan_travel_node] Duffel hotel search failed:', err);
       return {
         flight_results: flightResults,
         flight_results_cursor: flightCursor,
