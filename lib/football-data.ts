@@ -269,7 +269,7 @@ export async function geocodeVenue(venueName: string): Promise<GeocodedVenue | n
       lat,
       lng,
       nearestAirportCode: nearestAirportFromCity(cityHint),
-      city: feature.properties.city ?? feature.properties.county ?? feature.properties.country ?? venueName,
+      city: cityHint,
     };
   } catch (err) {
     console.warn('[football-data] geocodeVenue failed:', err);
