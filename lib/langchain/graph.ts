@@ -1,7 +1,12 @@
 import { ChatAnthropic } from '@langchain/anthropic';
-import { AIMessage, BaseMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { tool } from '@langchain/core/tools';
-import { Annotation, END, MemorySaver, START, StateGraph } from '@langchain/langgraph';
+import { AIMessage, BaseMessage } from '@langchain/core/messages';
+import {
+  Annotation,
+  END,
+  MemorySaver,
+  START,
+  StateGraph,
+} from '@langchain/langgraph';
 import { z } from 'zod';
 
 import {
@@ -11,27 +16,16 @@ import {
   toFanBuddyStatus,
 } from '../football-data';
 
-import { searchRoundTrip, type FlightOption } from '../amadeus-flights';
+import { searchRoundTrip, type FlightOption } from '../flights';
+import { searchHotels, type HotelOption } from '../hotels';
 
 import type {
-  FlightLeg,
   FormattedItinerary,
   ItineraryData,
   RawFlightOption,
   RawHotelOption,
   RawMatchFixture,
 } from './types';
-
-// Helper: tool.invoke() may return string or ToolMessage depending on @langchain/core version
-function extractToolString(result: unknown): string {
-  if (typeof result === 'string') return result;
-  if (result instanceof ToolMessage) {
-    return typeof result.content === 'string'
-      ? result.content
-      : JSON.stringify(result.content);
-  }
-  return JSON.stringify(result);
-}
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
@@ -80,102 +74,17 @@ const GraphState = Annotation.Root({
     reducer: (_, y) => y,
     default: () => 0,
   }),
+  hotel_results: Annotation<HotelOption[] | null>({
+    reducer: (_, y) => y,
+    default: () => null,
+  }),
+  hotel_results_cursor: Annotation<number>({
+    reducer: (_, y) => y,
+    default: () => 0,
+  }),
 });
 
 type State = typeof GraphState.State;
-
-// ─── Mock Tools ───────────────────────────────────────────────────────────────
-
-const searchMatchesTool = tool(
-  async ({ team }: { team: string; date_from: string; date_to: string }) => {
-    const isHomeTeamMadrid =
-      team.toLowerCase().includes('madrid') ||
-      team.toLowerCase().includes('real');
-    const fixture: RawMatchFixture = {
-      id: 'match-001',
-      league: 'La Liga',
-      matchday: 'Matchday 32',
-      homeTeam: isHomeTeamMadrid ? 'REAL MADRID' : 'BARCELONA',
-      awayTeam: isHomeTeamMadrid ? 'BARCELONA' : 'REAL MADRID',
-      venue: 'Santiago Bernabéu',
-      kickoffUtc: '2026-05-10T21:00:00Z',
-      ticketPriceEur: 245,
-      tvConfirmed: false,
-    };
-    return JSON.stringify(fixture);
-  },
-  {
-    name: 'search_matches',
-    description:
-      'Search upcoming match fixtures for a football team within a date range.',
-    schema: z.object({
-      team: z.string().describe('The team name to search fixtures for'),
-      date_from: z.string().describe('Start date in ISO format YYYY-MM-DD'),
-      date_to: z.string().describe('End date in ISO format YYYY-MM-DD'),
-    }),
-  },
-);
-
-
-const searchHotelsTool = tool(
-  async (_args: {
-    city: string;
-    check_in: string;
-    check_out: string;
-    max_price_per_night: number;
-  }) => {
-    void _args;
-    const result: RawHotelOption = {
-      name: 'Pestana CR7 Madrid',
-      city: 'Madrid',
-      checkIn: '2026-05-09',
-      checkOut: '2026-05-12',
-      nights: 3,
-      pricePerNightEur: 95,
-      totalEur: 285,
-    };
-    return JSON.stringify(result);
-  },
-  {
-    name: 'search_hotels',
-    description:
-      'Search hotels near the stadium for the given dates and budget.',
-    schema: z.object({
-      city: z.string().describe('City where the match is held'),
-      check_in: z.string().describe('Check-in date YYYY-MM-DD'),
-      check_out: z.string().describe('Check-out date YYYY-MM-DD'),
-      max_price_per_night: z
-        .number()
-        .describe('Maximum price per night in EUR'),
-    }),
-  },
-);
-
-const downgradeHotelTool = tool(
-  async (_args: { city: string; check_in: string; check_out: string }) => {
-    void _args;
-    const result: RawHotelOption = {
-      name: 'Hotel Moderno Madrid',
-      city: 'Madrid',
-      checkIn: '2026-05-09',
-      checkOut: '2026-05-12',
-      nights: 3,
-      pricePerNightEur: 65,
-      totalEur: 195,
-    };
-    return JSON.stringify(result);
-  },
-  {
-    name: 'downgrade_hotel',
-    description:
-      'Find a more budget-friendly hotel when the current selection exceeds the cost baseline.',
-    schema: z.object({
-      city: z.string().describe('City where the match is held'),
-      check_in: z.string().describe('Check-in date YYYY-MM-DD'),
-      check_out: z.string().describe('Check-out date YYYY-MM-DD'),
-    }),
-  },
-);
 
 // ─── Node: router_node ────────────────────────────────────────────────────────
 // Classifies user intent AND extracts travel preferences from the message in a
@@ -215,7 +124,8 @@ User message: "${lastMessage.content}"`,
   return {
     user_preferences: {
       origin_city: result.origin_city ?? state.user_preferences.origin_city,
-      favorite_team: result.favorite_team ?? state.user_preferences.favorite_team,
+      favorite_team:
+        result.favorite_team ?? state.user_preferences.favorite_team,
     },
   };
 }
@@ -228,7 +138,8 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
 
   // Gate: ask for whichever piece of data is still missing
   if (!teamName && !origin_city) {
-    const reply = "To get started, tell me which team you'd like to watch and the city you're travelling from.";
+    const reply =
+      "To get started, tell me which team you'd like to watch and the city you're travelling from.";
     return { direct_reply: reply, messages: [new AIMessage(reply)] };
   }
   if (!teamName) {
@@ -273,7 +184,24 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
     // Pick the nearest upcoming fixture
     const fixture = fixtures[0];
     const venueName = fixture.venue ?? `${fixture.homeTeam.name} Stadium`;
-    const geo = await geocodeVenue(venueName);
+    const [geo, originGeo] = await Promise.all([
+      geocodeVenue(venueName),
+      geocodeVenue(origin_city),
+    ]);
+
+    // Guardrail: if the match venue is in the user's home city, trip planning
+    // makes no sense. Compare nearest airport codes — same IATA code = same city.
+    if (
+      geo?.nearestAirportCode &&
+      originGeo?.nearestAirportCode &&
+      geo.nearestAirportCode === originGeo.nearestAirportCode
+    ) {
+      const reply =
+        `The next ${fixture.homeTeam.name} match is at ${venueName} — ` +
+        `that's right in ${origin_city}! No travel needed for a home game. ` +
+        `Would you like to plan a trip to an away match instead?`;
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
 
     const match: RawMatchFixture = {
       id: String(fixture.id),
@@ -285,7 +213,13 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
       kickoffUtc: fixture.utcDate, // ISO 8601 UTC — required by validator_node
       ticketPriceEur: 0, // placeholder; tickets API not yet integrated
       tvConfirmed: toFanBuddyStatus(fixture.status) === 'CONFIRMED',
-      ...(geo ? { lat: geo.lat, lng: geo.lng, nearestAirportCode: geo.nearestAirportCode } : {}),
+      ...(geo
+        ? {
+            lat: geo.lat,
+            lng: geo.lng,
+            nearestAirportCode: geo.nearestAirportCode,
+          }
+        : {}),
     };
 
     return {
@@ -322,6 +256,10 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
     return {
       validation_errors: ['No match data available — cannot plan travel'],
       attempt_count: 3, // exit retry loop
+      flight_results: null,
+      flight_results_cursor: 0,
+      hotel_results: null,
+      hotel_results_cursor: 0,
     };
   }
 
@@ -329,10 +267,12 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
   const kickoff = new Date(match.kickoffUtc);
   const matchEndMs = kickoff.getTime() + 105 * 60 * 1000; // kickoff + 105 min
 
+  // Arrive the day before the match, depart the day after it ends.
+  // Use UTC date methods to avoid local-timezone drift on Amadeus date params.
   const departureDate = new Date(kickoff);
-  departureDate.setDate(departureDate.getDate() - 1); // arrive 1 day before
+  departureDate.setUTCDate(departureDate.getUTCDate() - 1);
   const returnDate = new Date(matchEndMs);
-  returnDate.setDate(returnDate.getDate() + 1); // depart 1 day after match end
+  returnDate.setUTCDate(returnDate.getUTCDate() + 1);
 
   const departureDateStr = departureDate.toISOString().slice(0, 10);
   const returnDateStr = returnDate.toISOString().slice(0, 10);
@@ -344,7 +284,7 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
 
   // ── Flight selection ───────────────────────────────────────────────────────
   let flightResults = state.flight_results;
-  let cursor = state.flight_results_cursor;
+  let flightCursor = state.flight_results_cursor;
 
   if (flightResults === null) {
     // First run — fetch from Amadeus and cache results
@@ -357,49 +297,57 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
         adults: 1,
       });
     } catch (err) {
-      console.error('[plan_travel_node] Amadeus search failed:', err);
+      console.error('[plan_travel_node] Amadeus flight search failed:', err);
       const detail =
         err &&
         typeof err === 'object' &&
         'description' in err &&
         Array.isArray((err as { description: unknown }).description)
-          ? ((err as { description: Array<{ detail?: string }> }).description[0]?.detail ?? 'unknown error')
+          ? ((err as { description: Array<{ detail?: string }> }).description[0]
+              ?.detail ?? 'unknown error')
           : String(err);
       return {
         flight_results: [],
         flight_results_cursor: 0,
+        hotel_results: state.hotel_results,
+        hotel_results_cursor: 0,
         validation_errors: [`Flight search failed — ${detail}`],
         itinerary: {
           match: state.itinerary?.match ?? null,
           flight: null,
-          hotel: state.itinerary?.hotel ?? null,
+          hotel: null,
         },
         attempt_count: 3, // exit retry loop
       };
     }
-    cursor = 0;
+    flightCursor = 0;
   } else {
-    // Retry — shouldRetryOrFinish already decided to loop back, advance cursor
-    cursor += 1;
+    // Retry — shouldRetryOrFinish already decided to loop back; advance to next flight
+    flightCursor += 1;
   }
 
-  // ── Cursor exhaustion ──────────────────────────────────────────────────────
-  if (flightResults.length === 0 || cursor >= flightResults.length) {
-    console.warn('[plan_travel_node] NO_VALID_FLIGHTS — cursor exhausted at index', cursor);
+  // ── Cursor exhaustion — flights ────────────────────────────────────────────
+  if (flightResults.length === 0 || flightCursor >= flightResults.length) {
+    console.warn(
+      '[plan_travel_node] NO_VALID_FLIGHTS — cursor exhausted at index',
+      flightCursor,
+    );
     return {
       flight_results: flightResults,
-      flight_results_cursor: cursor,
+      flight_results_cursor: flightCursor,
+      hotel_results: state.hotel_results,
+      hotel_results_cursor: 0,
       itinerary: {
         match: state.itinerary?.match ?? null,
         flight: null,
-        hotel: state.itinerary?.hotel ?? null,
+        hotel: null,
       },
       attempt_count: state.attempt_count + 1,
     };
   }
 
-  // ── Map FlightOption → RawFlightOption ────────────────────────────────────
-  const chosen = flightResults[cursor];
+  // ── Map chosen FlightOption → RawFlightOption ──────────────────────────────
+  const chosen = flightResults[flightCursor];
   const pricePerLeg = chosen.totalPriceUSD / 2; // TODO: USD→EUR conversion
 
   const flight: RawFlightOption = {
@@ -423,35 +371,101 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
     },
   };
 
-  // ── Hotel logic (unchanged) ────────────────────────────────────────────────
-  const city = match.venue?.includes('Bernabéu') ? 'Madrid' : 'Barcelona';
+  // ── Hotel selection ────────────────────────────────────────────────────────
+  // Hotel results are fetched once and cached. On flight retry, the hotel
+  // cursor always resets to 0 — we want the best available hotel for each
+  // new flight candidate.
+  let hotelResults = state.hotel_results;
 
-  const hotelRaw = await searchHotelsTool.invoke({
-    city,
-    check_in: departureDateStr,
-    check_out: returnDateStr,
-    max_price_per_night: 120,
-  });
-  let hotel = JSON.parse(extractToolString(hotelRaw)) as RawHotelOption;
+  if (hotelResults === null) {
+    try {
+      hotelResults = await searchHotels({
+        lat: match.lat ?? 0,
+        lng: match.lng ?? 0,
+        checkInDate: departureDateStr,
+        checkOutDate: returnDateStr,
+        adults: 1,
+        minStarRating: 3,
+      });
+    } catch (err) {
+      console.error('[plan_travel_node] Duffel hotel search failed:', err);
+      return {
+        flight_results: flightResults,
+        flight_results_cursor: flightCursor,
+        hotel_results: [],
+        hotel_results_cursor: 0,
+        validation_errors: [`Hotel search failed — ${String(err)}`],
+        itinerary: {
+          match: state.itinerary?.match ?? null,
+          flight,
+          hotel: null,
+        },
+        attempt_count: 3, // exit retry loop
+      };
+    }
+  }
 
-  // Deterministic budget check — downgrade hotel if total exceeds baseline
-  const flightTotal = flight.outbound.priceEur + flight.inbound.priceEur;
-  if (flightTotal + hotel.totalEur > BUDGET_BASELINE_EUR) {
-    const downgraded = await downgradeHotelTool.invoke({
-      city: hotel.city,
-      check_in: hotel.checkIn,
-      check_out: hotel.checkOut,
-    });
-    hotel = JSON.parse(extractToolString(downgraded)) as RawHotelOption;
+  // ── Budget-aware hotel selection (hotels before flights) ───────────────────
+  // Sorted list from searchHotels: starRating DESC, price ASC.
+  // Walk from index 0 to find the best hotel that keeps total under budget.
+  // On a flight retry the cursor always resets to 0 (we pick fresh for new flight).
+  const flightTotalEur = flight.outbound.priceEur + flight.inbound.priceEur;
+  let selectedHotel: RawHotelOption | null = null;
+  let finalHotelCursor = 0;
+
+  for (let hc = 0; hc < hotelResults.length; hc++) {
+    const h = hotelResults[hc];
+    // TODO: h.totalPriceUSD is in USD (Amadeus returns USD); flightTotalEur is
+    // approximated from USD/2 with no conversion. Budget comparison mixes currencies.
+    // Wire a real USD→EUR rate before shipping to production.
+    if (flightTotalEur + h.totalPriceUSD <= BUDGET_BASELINE_EUR) {
+      selectedHotel = {
+        name: h.name,
+        city: destinationIata,
+        checkIn: h.checkInDate,
+        checkOut: h.checkOutDate,
+        nights: h.nights,
+        pricePerNightEur: h.pricePerNight,
+        totalEur: h.totalPriceUSD,
+        wasDowngraded: hc > 0, // true when budget pressure forced skipping higher-ranked options
+      };
+      finalHotelCursor = hc;
+      break;
+    }
+  }
+
+  if (selectedHotel === null) {
+    // No hotel fits within budget for this flight candidate. Return with
+    // hotel = null so validator_node emits an incomplete-itinerary error,
+    // which triggers the retry loop to advance the flight cursor on the
+    // next call to plan_travel_node.
+    console.warn(
+      '[plan_travel_node] No hotel within budget for flight cursor',
+      flightCursor,
+    );
+    return {
+      flight_results: flightResults,
+      flight_results_cursor: flightCursor,
+      hotel_results: hotelResults,
+      hotel_results_cursor: hotelResults.length, // mark as exhausted
+      itinerary: {
+        match: state.itinerary?.match ?? null,
+        flight,
+        hotel: null,
+      },
+      attempt_count: state.attempt_count + 1,
+    };
   }
 
   return {
     flight_results: flightResults,
-    flight_results_cursor: cursor,
+    flight_results_cursor: flightCursor,
+    hotel_results: hotelResults,
+    hotel_results_cursor: finalHotelCursor,
     itinerary: {
       match: state.itinerary?.match ?? null,
       flight,
-      hotel,
+      hotel: selectedHotel,
     },
     attempt_count: state.attempt_count + 1,
   };
@@ -521,7 +535,7 @@ async function formatter_node(state: State): Promise<Partial<State>> {
   const matchTicketEur = itinerary.match.ticketPriceEur;
   const stayEur = itinerary.hotel.totalEur;
   const totalEur = flightsEur + matchTicketEur + stayEur;
-  const wasDowngraded = itinerary.hotel.name.toLowerCase().includes('moderno');
+  const wasDowngraded = itinerary.hotel.wasDowngraded;
 
   // Single LLM call — only for the natural-language summary
   const summaryResponse = await model.invoke(
