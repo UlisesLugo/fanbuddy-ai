@@ -67,7 +67,7 @@ function mockLiteApi(hotels: LiteApiHotel[], rates: LiteApiRate[]) {
     } as unknown as Response)
     .mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ data: rates }),
+      text: () => Promise.resolve(JSON.stringify({ data: rates })),
     } as unknown as Response);
 }
 
@@ -361,7 +361,7 @@ describe('searchHotels', () => {
       .mockResolvedValueOnce({
         ok: false,
         status: 503,
-        json: () => Promise.resolve({}),
+        text: () => Promise.resolve(''),
       } as unknown as Response);
 
     await expect(

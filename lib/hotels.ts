@@ -25,14 +25,14 @@ type LiteApiRate = {
 export interface HotelOption {
   id: string;
   name: string;
-  starRating: number;           // 1–5; defaults to 3 if API omits the field
-  totalPriceUSD: number;        // full stay price (field name kept for interface compat)
+  starRating: number; // 1–5; defaults to 3 if API omits the field
+  totalPriceUSD: number; // full stay price (field name kept for interface compat)
   pricePerNight: number;
   currency: string;
-  checkInDate: string;          // YYYY-MM-DD
-  checkOutDate: string;         // YYYY-MM-DD
+  checkInDate: string; // YYYY-MM-DD
+  checkOutDate: string; // YYYY-MM-DD
   nights: number;
-  distanceFromVenueKm: number | null;  // km from venue; null if API omits
+  distanceFromVenueKm: number | null; // km from venue; null if API omits
   amenities: string[];
   cancellable: boolean;
   latitude: number | null;
@@ -42,11 +42,11 @@ export interface HotelOption {
 export interface HotelSearchParams {
   lat: number;
   lng: number;
-  checkInDate: string;          // YYYY-MM-DD
-  checkOutDate: string;         // YYYY-MM-DD
+  checkInDate: string; // YYYY-MM-DD
+  checkOutDate: string; // YYYY-MM-DD
   adults: number;
-  minStarRating?: number;       // default 3
-  maxResults?: number;          // default 20
+  minStarRating?: number; // default 3
+  maxResults?: number; // default 20
 }
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ export async function searchHotels(
   // ── Step 1: Get hotels near coordinates ─────────────────────────────────────
   const hotelsUrl =
     `https://api.liteapi.travel/v3.0/data/hotels` +
-    `?latitude=${params.lat}&longitude=${params.lng}&radius=5&limit=20`;
+    `?latitude=${params.lat}&longitude=${params.lng}&radius=5000&limit=20`;
   const step1Start = Date.now();
   const hotelsRes = await fetch(hotelsUrl, { headers });
   console.log(
@@ -119,11 +119,15 @@ export async function searchHotels(
 
   if (!ratesRes.ok) throw new Error('NO_HOTEL_AVAILABILITY');
 
-  const ratesData = await ratesRes.json();
+  const ratesText = await ratesRes.text();
+  if (!ratesText) throw new Error('NO_HOTEL_AVAILABILITY');
+  const ratesData = JSON.parse(ratesText);
   const rates: LiteApiRate[] = ratesData.data ?? [];
 
   // Build a lookup map from hotelId → rate entry
-  const rateMap = new Map<string, LiteApiRate>(rates.map((r) => [r.hotelId, r]));
+  const rateMap = new Map<string, LiteApiRate>(
+    rates.map((r) => [r.hotelId, r]),
+  );
 
   // Merge hotel info + rates — drop hotels with no available rate
   const hotelOptions: HotelOption[] = [];
