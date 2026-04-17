@@ -47,7 +47,6 @@ const model = new ChatAnthropic({
 // ─── Graph State ──────────────────────────────────────────────────────────────
 
 const GraphState = Annotation.Root({
-  // Conversational history — user messages + AI replies only (no tool noise)
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
     default: () => [],
@@ -60,9 +59,15 @@ const GraphState = Annotation.Root({
     reducer: (_, y) => y,
     default: () => [],
   }),
-  user_preferences: Annotation<{ origin_city: string; favorite_team: string }>({
+  user_preferences: Annotation<UserPreferences>({
     reducer: (_, y) => y,
-    default: () => ({ origin_city: '', favorite_team: '' }),
+    default: () => ({
+      origin_city: '',
+      favorite_team: '',
+      selected_match_id: null,
+      travel_dates: null,
+      spending_tier: null,
+    }),
   }),
   attempt_count: Annotation<number>({
     reducer: (_, y) => y,
@@ -75,6 +80,14 @@ const GraphState = Annotation.Root({
   direct_reply: Annotation<string | null>({
     reducer: (_, y) => y,
     default: () => null,
+  }),
+  free_tier_links: Annotation<FreeTierLinks | null>({
+    reducer: (_, y) => y,
+    default: () => null,
+  }),
+  wants_date_recommendation: Annotation<boolean>({
+    reducer: (_, y) => y,
+    default: () => false,
   }),
   flight_results: Annotation<FlightOption[] | null>({
     reducer: (_, y) => y,
@@ -157,17 +170,15 @@ Extract the following from the user's message if present:
 User message: "${lastMessage.content}"`,
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return {
     user_preferences: {
       origin_city: result.origin_city ?? state.user_preferences.origin_city,
       favorite_team: result.favorite_team ?? state.user_preferences.favorite_team,
-      selected_match_id: result.selected_match_id ?? (state.user_preferences as UserPreferences).selected_match_id ?? null,
-      travel_dates: result.travel_dates ?? (state.user_preferences as UserPreferences).travel_dates ?? null,
-      spending_tier: result.spending_tier ?? (state.user_preferences as UserPreferences).spending_tier ?? null,
-    } as UserPreferences,
-    // wants_date_recommendation will be added to GraphState in Task 9
-    ...({ wants_date_recommendation: result.wants_date_recommendation } as any),
+      selected_match_id: result.selected_match_id ?? state.user_preferences.selected_match_id ?? null,
+      travel_dates: result.travel_dates ?? state.user_preferences.travel_dates ?? null,
+      spending_tier: result.spending_tier ?? state.user_preferences.spending_tier ?? null,
+    },
+    wants_date_recommendation: result.wants_date_recommendation,
   };
 }
 
@@ -176,7 +187,7 @@ User message: "${lastMessage.content}"`,
 // When a match is already selected, geocodes the venue and sets itinerary.match.
 
 async function list_matches_node(state: State): Promise<Partial<State>> {
-  const { favorite_team: teamName, selected_match_id } = state.user_preferences as UserPreferences;
+  const { favorite_team: teamName, selected_match_id } = state.user_preferences;
 
   if (!teamName) {
     const reply = "Which football team would you like to watch? I'll find their upcoming fixtures.";
@@ -291,7 +302,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
 // Gates on origin_city and spending_tier both being present.
 
 async function collect_preferences_node(state: State): Promise<Partial<State>> {
-  const { origin_city, spending_tier } = state.user_preferences as UserPreferences;
+  const { origin_city, spending_tier } = state.user_preferences;
 
   if (!origin_city && !spending_tier) {
     const reply =
@@ -320,7 +331,7 @@ async function collect_preferences_node(state: State): Promise<Partial<State>> {
 // Otherwise, asks the user for dates.
 
 async function confirm_dates_node(state: State): Promise<Partial<State>> {
-  const { travel_dates, spending_tier } = state.user_preferences as UserPreferences;
+  const { travel_dates, spending_tier } = state.user_preferences;
 
   // Already have dates — pass through
   if (travel_dates) {
@@ -328,7 +339,7 @@ async function confirm_dates_node(state: State): Promise<Partial<State>> {
   }
 
   // User asked for a recommendation — compute dates from spending tier
-  if ((state as any).wants_date_recommendation) {
+  if (state.wants_date_recommendation) {
     const match = state.itinerary?.match;
     if (!match) {
       const reply = 'I lost track of the match details. Could you pick a match again?';
@@ -340,7 +351,7 @@ async function confirm_dates_node(state: State): Promise<Partial<State>> {
       user_preferences: {
         ...state.user_preferences,
         travel_dates: dates,
-      } as UserPreferences,
+      },
     };
   }
 
@@ -361,7 +372,7 @@ async function confirm_dates_node(state: State): Promise<Partial<State>> {
 
 async function generate_links_node(state: State): Promise<Partial<State>> {
   const match = state.itinerary?.match;
-  const { origin_city, travel_dates } = state.user_preferences as UserPreferences;
+  const { origin_city, travel_dates } = state.user_preferences;
 
   if (!match || !travel_dates) {
     const reply = 'Something went wrong putting your trip together. Please start over.';
@@ -390,7 +401,7 @@ async function generate_links_node(state: State): Promise<Partial<State>> {
     free_tier_links: links,
     direct_reply: reply,
     messages: [new AIMessage(reply)],
-  } as Partial<State>;
+  };
 }
 
 // ─── Node: search_matches_node ────────────────────────────────────────────────
@@ -852,28 +863,11 @@ Flight: ${itinerary.flight.outbound.airline}, €${flightsEur}. Hotel: ${itinera
 
 // ─── Conditional Edges ────────────────────────────────────────────────────────
 
-// Short-circuit to END if search_matches_node returned a prompt (missing data / unsupported team).
-function afterSearchMatches(state: State): 'plan_travel_node' | typeof END {
-  return state.direct_reply ? END : 'plan_travel_node';
-}
-
-function shouldRetryOrFinish(
+function afterDirectReply(
   state: State,
-): 'plan_travel_node' | 'formatter_node' {
-  // Cursor exhausted — no more cached flights to try
-  if (
-    state.flight_results !== null &&
-    state.flight_results_cursor >= state.flight_results.length
-  ) {
-    return 'formatter_node';
-  }
-  const hardErrors = state.validation_errors.filter(
-    (e) => !e.includes('PROVISIONAL'),
-  );
-  if (hardErrors.length > 0 && state.attempt_count < 3) {
-    return 'plan_travel_node';
-  }
-  return 'formatter_node';
+  nextNode: string,
+): string | typeof END {
+  return state.direct_reply ? END : nextNode;
 }
 
 // ─── Graph Assembly ───────────────────────────────────────────────────────────
@@ -882,22 +876,28 @@ const checkpointer = new MemorySaver();
 
 const graph = new StateGraph(GraphState)
   .addNode('router_node', router_node)
-  .addNode('search_matches_node', search_matches_node)
-  .addNode('plan_travel_node', plan_travel_node)
-  .addNode('validator_node', validator_node)
-  .addNode('formatter_node', formatter_node)
+  .addNode('list_matches_node', list_matches_node)
+  .addNode('collect_preferences_node', collect_preferences_node)
+  .addNode('confirm_dates_node', confirm_dates_node)
+  .addNode('generate_links_node', generate_links_node)
   .addEdge(START, 'router_node')
-  .addEdge('router_node', 'search_matches_node')
-  .addConditionalEdges('search_matches_node', afterSearchMatches, {
-    plan_travel_node: 'plan_travel_node',
-    [END]: END,
-  })
-  .addEdge('plan_travel_node', 'validator_node')
-  .addConditionalEdges('validator_node', shouldRetryOrFinish, {
-    plan_travel_node: 'plan_travel_node',
-    formatter_node: 'formatter_node',
-  })
-  .addEdge('formatter_node', END)
+  .addEdge('router_node', 'list_matches_node')
+  .addConditionalEdges(
+    'list_matches_node',
+    (state) => afterDirectReply(state, 'collect_preferences_node'),
+    { collect_preferences_node: 'collect_preferences_node', [END]: END },
+  )
+  .addConditionalEdges(
+    'collect_preferences_node',
+    (state) => afterDirectReply(state, 'confirm_dates_node'),
+    { confirm_dates_node: 'confirm_dates_node', [END]: END },
+  )
+  .addConditionalEdges(
+    'confirm_dates_node',
+    (state) => afterDirectReply(state, 'generate_links_node'),
+    { generate_links_node: 'generate_links_node', [END]: END },
+  )
+  .addEdge('generate_links_node', END)
   .compile({ checkpointer });
 
 export { graph };
