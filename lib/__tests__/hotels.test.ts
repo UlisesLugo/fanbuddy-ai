@@ -17,10 +17,12 @@ type LiteApiHotel = {
 
 type LiteApiRate = {
   hotelId: string;
-  cheapestRate: {
-    retailRate: { total: Array<{ amount: number; currency: string }> };
-    cancellationPolicies: { refundable: boolean };
-  } | null;
+  roomTypes: Array<{
+    rates: Array<{
+      retailRate: { total: Array<{ amount: number; currency: string }> };
+      cancellationPolicies: { refundableTag: string };
+    }>;
+  }>;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -45,16 +47,23 @@ function makeLiteApiRate(overrides: {
   amount?: number;
   refundable?: boolean;
 } = {}): LiteApiRate {
+  const isRefundable = overrides.refundable !== undefined ? overrides.refundable : true;
   return {
     hotelId: overrides.hotelId ?? 'lp001',
-    cheapestRate: {
-      retailRate: {
-        total: [{ amount: overrides.amount ?? 300, currency: 'EUR' }],
+    roomTypes: [
+      {
+        rates: [
+          {
+            retailRate: {
+              total: [{ amount: overrides.amount ?? 300, currency: 'EUR' }],
+            },
+            cancellationPolicies: {
+              refundableTag: isRefundable ? 'RFN' : 'NRFN',
+            },
+          },
+        ],
       },
-      cancellationPolicies: {
-        refundable: overrides.refundable !== undefined ? overrides.refundable : true,
-      },
-    },
+    ],
   };
 }
 
@@ -214,7 +223,7 @@ describe('searchHotels', () => {
   it('throws NO_HOTEL_AVAILABILITY when all hotels have no available rates', async () => {
     mockLiteApi(
       [makeLiteApiHotel({ id: 'lp1' })],
-      [{ hotelId: 'lp1', cheapestRate: null }],
+      [{ hotelId: 'lp1', roomTypes: [] }],
     );
 
     await expect(
@@ -307,7 +316,7 @@ describe('searchHotels', () => {
     });
 
     const [url, init] = mockFetch.mock.calls[1] as [string, RequestInit];
-    expect(url).toBe('https://api.liteapi.travel/v3.0/rates');
+    expect(url).toBe('https://api.liteapi.travel/v3.0/hotels/rates');
     expect(init.method).toBe('POST');
     const body = JSON.parse(init.body as string);
     expect(body.hotelIds).toEqual(['lp001']);

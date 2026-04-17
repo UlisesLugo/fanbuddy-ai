@@ -8,16 +8,20 @@ type LiteApiHotel = {
   distance: number | null;
 };
 
+type LiteApiRateEntry = {
+  retailRate: {
+    total: Array<{ amount: number; currency: string }>;
+  };
+  cancellationPolicies: {
+    refundableTag: string; // "RFN" = refundable, "NRFN" = non-refundable
+  };
+};
+
 type LiteApiRate = {
   hotelId: string;
-  cheapestRate: {
-    retailRate: {
-      total: Array<{ amount: number; currency: string }>;
-    };
-    cancellationPolicies: {
-      refundable: boolean;
-    };
-  } | null;
+  roomTypes: Array<{
+    rates: LiteApiRateEntry[];
+  }>;
 };
 
 // ─── Exported types ────────────────────────────────────────────────────────────
@@ -85,7 +89,9 @@ export async function searchHotels(
     `https://api.liteapi.travel/v3.0/data/hotels` +
     `?latitude=${params.lat}&longitude=${params.lng}&radius=5000&limit=20`;
   const step1Start = Date.now();
-  console.log(`[liteapi] GET /data/hotels lat=${params.lat} lng=${params.lng} radius=5000m limit=20`);
+  console.log(
+    `[liteapi] GET /data/hotels lat=${params.lat} lng=${params.lng} radius=5000m limit=20`,
+  );
   const hotelsRes = await fetch(hotelsUrl, { headers });
   const step1Ms = Date.now() - step1Start;
   console.log(
@@ -103,10 +109,10 @@ export async function searchHotels(
   const hotelIds = hotels.map((h) => h.id);
 
   // ── Step 2: Get rates for those hotels ──────────────────────────────────────
-  const ratesUrl = 'https://api.liteapi.travel/v3.0/rates';
+  const ratesUrl = 'https://api.liteapi.travel/v3.0/hotels/rates';
   const step2Start = Date.now();
   console.log(
-    `[liteapi] POST /rates hotelIds=[${hotelIds.join(', ')}] checkin=${params.checkInDate} checkout=${params.checkOutDate} adults=${params.adults} currency=EUR`,
+    `[liteapi] POST /hotels/rates hotelIds=[${hotelIds.join(', ')}] checkin=${params.checkInDate} checkout=${params.checkOutDate} adults=${params.adults} currency=EUR`,
   );
   const ratesRes = await fetch(ratesUrl, {
     method: 'POST',
@@ -116,24 +122,29 @@ export async function searchHotels(
       occupancies: [{ adults: params.adults }],
       checkin: params.checkInDate,
       checkout: params.checkOutDate,
+      guestNationality: 'MX', // TODO: make this dynamic
       currency: 'EUR',
     }),
   });
   const step2Ms = Date.now() - step2Start;
   console.log(
-    `[liteapi] ${ratesRes.ok ? '✓' : '✗'} POST /rates → ${ratesRes.status} (${step2Ms}ms)`,
+    `[liteapi] ${ratesRes.ok ? '✓' : '✗'} POST /hotels/rates → ${ratesRes.status} (${step2Ms}ms)`,
   );
 
   if (!ratesRes.ok) throw new Error('NO_HOTEL_AVAILABILITY');
 
   const ratesText = await ratesRes.text();
   if (!ratesText) {
-    console.log('[liteapi] POST /rates returned empty body — no inventory for requested dates');
+    console.log(
+      '[liteapi] POST /hotels/rates returned empty body — no inventory for requested dates',
+    );
     throw new Error('NO_HOTEL_AVAILABILITY');
   }
   const ratesData = JSON.parse(ratesText);
   const rates: LiteApiRate[] = ratesData.data ?? [];
-  console.log(`[liteapi] POST /rates returned ${rates.length} hotel(s) with rates`);
+  console.log(
+    `[liteapi] POST /hotels/rates returned ${rates.length} hotel(s) with rates`,
+  );
 
   // Build a lookup map from hotelId → rate entry
   const rateMap = new Map<string, LiteApiRate>(
@@ -144,10 +155,24 @@ export async function searchHotels(
   const hotelOptions: HotelOption[] = [];
   for (const hotel of hotels) {
     const rateEntry = rateMap.get(hotel.id);
-    if (!rateEntry?.cheapestRate) continue;
+    if (!rateEntry) continue;
 
-    const total = rateEntry.cheapestRate.retailRate.total[0];
-    if (!total) continue;
+    // Find the cheapest rate across all roomTypes
+    let cheapest: { amount: number; currency: string; cancellable: boolean } | null = null;
+    for (const roomType of rateEntry.roomTypes) {
+      for (const rate of roomType.rates) {
+        const total = rate.retailRate.total[0];
+        if (!total) continue;
+        if (cheapest === null || total.amount < cheapest.amount) {
+          cheapest = {
+            amount: total.amount,
+            currency: total.currency,
+            cancellable: rate.cancellationPolicies.refundableTag === 'RFN',
+          };
+        }
+      }
+    }
+    if (!cheapest) continue;
 
     const starRating =
       hotel.starRating !== null && !isNaN(hotel.starRating as number)
@@ -158,15 +183,15 @@ export async function searchHotels(
       id: hotel.id,
       name: hotel.name,
       starRating,
-      totalPriceUSD: total.amount,
-      pricePerNight: nights > 0 ? total.amount / nights : total.amount,
-      currency: total.currency,
+      totalPriceUSD: cheapest.amount,
+      pricePerNight: nights > 0 ? cheapest.amount / nights : cheapest.amount,
+      currency: cheapest.currency,
       checkInDate: params.checkInDate,
       checkOutDate: params.checkOutDate,
       nights,
       distanceFromVenueKm: hotel.distance ?? null,
       amenities: [],
-      cancellable: rateEntry.cheapestRate.cancellationPolicies.refundable,
+      cancellable: cheapest.cancellable,
       latitude: hotel.location.latitude,
       longitude: hotel.location.longitude,
     });
