@@ -21,10 +21,12 @@ import { searchHotels, type HotelOption } from '../hotels';
 
 import type {
   FormattedItinerary,
+  FreeTierLinks,
   ItineraryData,
   RawFlightOption,
   RawHotelOption,
   RawMatchFixture,
+  UserPreferences,
 } from './types';
 
 // ─── Model ────────────────────────────────────────────────────────────────────
@@ -95,13 +97,37 @@ const RouterSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'City the user is travelling FROM (e.g. "London", "Berlin"). Null if not mentioned.',
+      'City the user is travelling FROM (e.g. "from London", "leaving Berlin"). Null if not mentioned.',
     ),
   favorite_team: z
     .string()
     .nullable()
     .describe(
-      'Football club the user wants to watch (e.g. "Barcelona", "Real Madrid"). Null if not mentioned.',
+      'Football club the user wants to watch (e.g. "watch Barcelona", "Real Madrid game"). Null if not mentioned.',
+    ),
+  selected_match_id: z
+    .string()
+    .nullable()
+    .describe(
+      'The 1-based index of the match the user selected from a numbered list (e.g. "I\'ll take match 3" → "3", "the second one" → "2"). Null if the user has not selected a match.',
+    ),
+  spending_tier: z
+    .enum(['luxury', 'value', 'budget'])
+    .nullable()
+    .describe(
+      'Spending preference: "luxury" (premium/high-end), "value" (quality-price balance), "budget" (cheapest option). Null if not mentioned.',
+    ),
+  travel_dates: z
+    .object({
+      checkIn: z.string().describe('Check-in date in YYYY-MM-DD format'),
+      checkOut: z.string().describe('Check-out date in YYYY-MM-DD format'),
+    })
+    .nullable()
+    .describe('Travel dates if the user provides specific dates. Null if not mentioned.'),
+  wants_date_recommendation: z
+    .boolean()
+    .describe(
+      'True if the user asks the agent to recommend dates or says "you decide" / "give me a recommendation". False otherwise.',
     ),
 });
 
@@ -113,20 +139,27 @@ async function router_node(state: State): Promise<Partial<State>> {
     `You are an information extractor for FanBuddy.AI, a football trip planning app.
 
 Extract the following from the user's message if present:
-- origin_city: the city the user is travelling FROM (e.g. "from London", "leaving Berlin"). Set null if not mentioned.
-- favorite_team: the football club the user wants to watch (e.g. "watch Barcelona", "Real Madrid game"). Set null if not mentioned.
+- origin_city: the city the user is travelling FROM. Null if not mentioned.
+- favorite_team: the football club the user wants to watch. Null if not mentioned.
+- selected_match_id: a 1-based index if the user picks a match from a numbered list (e.g. "match 2" → "2"). Null if not mentioned.
+- spending_tier: "luxury", "value", or "budget" if the user expresses a spending preference. Null if not mentioned.
+- travel_dates: { checkIn, checkOut } in YYYY-MM-DD format if the user provides specific travel dates. Null if not mentioned.
+- wants_date_recommendation: true ONLY if the user explicitly asks you to recommend dates or says "you decide". false otherwise.
 
 User message: "${lastMessage.content}"`,
   );
 
-  // Only overwrite a preference when the user explicitly mentions it;
-  // otherwise keep the value that was persisted from a previous turn.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return {
     user_preferences: {
       origin_city: result.origin_city ?? state.user_preferences.origin_city,
-      favorite_team:
-        result.favorite_team ?? state.user_preferences.favorite_team,
-    },
+      favorite_team: result.favorite_team ?? state.user_preferences.favorite_team,
+      selected_match_id: result.selected_match_id ?? (state.user_preferences as UserPreferences).selected_match_id ?? null,
+      travel_dates: result.travel_dates ?? (state.user_preferences as UserPreferences).travel_dates ?? null,
+      spending_tier: result.spending_tier ?? (state.user_preferences as UserPreferences).spending_tier ?? null,
+    } as UserPreferences,
+    // wants_date_recommendation will be added to GraphState in Task 9
+    ...({ wants_date_recommendation: result.wants_date_recommendation } as any),
   };
 }
 
