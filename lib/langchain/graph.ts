@@ -29,7 +29,13 @@ import type {
   UserPreferences,
 } from './types';
 
-import { formatFixtureList, type FixtureSummary } from './free-tier';
+import {
+  buildAccommodationUrl,
+  buildTransportUrl,
+  formatFixtureList,
+  recommendTravelDates,
+  type FixtureSummary,
+} from './free-tier';
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
@@ -279,6 +285,112 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       hotel: state.itinerary?.hotel ?? null,
     },
   };
+}
+
+// ─── Node: collect_preferences_node ──────────────────────────────────────────
+// Gates on origin_city and spending_tier both being present.
+
+async function collect_preferences_node(state: State): Promise<Partial<State>> {
+  const { origin_city, spending_tier } = state.user_preferences as UserPreferences;
+
+  if (!origin_city && !spending_tier) {
+    const reply =
+      "What city are you travelling from, and what's your spending style? " +
+      'Choose: **Luxury** (premium experience), **Value** (quality-price balance), or **Budget** (cheapest options).';
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  if (!origin_city) {
+    const reply = 'What city are you travelling from?';
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  if (!spending_tier) {
+    const reply =
+      "What's your spending style? Choose: **Luxury** (premium experience), **Value** (quality-price balance), or **Budget** (cheapest options).";
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  return {};
+}
+
+// ─── Node: confirm_dates_node ─────────────────────────────────────────────────
+// If travel_dates are already set, passes through.
+// If wants_date_recommendation is true, computes dates from spending_tier.
+// Otherwise, asks the user for dates.
+
+async function confirm_dates_node(state: State): Promise<Partial<State>> {
+  const { travel_dates, spending_tier } = state.user_preferences as UserPreferences;
+
+  // Already have dates — pass through
+  if (travel_dates) {
+    return {};
+  }
+
+  // User asked for a recommendation — compute dates from spending tier
+  if ((state as any).wants_date_recommendation) {
+    const match = state.itinerary?.match;
+    if (!match) {
+      const reply = 'I lost track of the match details. Could you pick a match again?';
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
+
+    const dates = recommendTravelDates(match.kickoffUtc, spending_tier!);
+    return {
+      user_preferences: {
+        ...state.user_preferences,
+        travel_dates: dates,
+      } as UserPreferences,
+    };
+  }
+
+  // Ask for dates
+  const match = state.itinerary?.match;
+  const kickoffHint = match
+    ? ` The match is on ${new Date(match.kickoffUtc).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}.`
+    : '';
+
+  const reply =
+    `Do you know when you'd like to travel?${kickoffHint} ` +
+    `You can give me specific dates (e.g. "Apr 19 to Apr 22"), or just say **"recommend dates"** and I'll suggest based on your ${spending_tier} budget.`;
+  return { direct_reply: reply, messages: [new AIMessage(reply)] };
+}
+
+// ─── Node: generate_links_node ────────────────────────────────────────────────
+// Builds free-tier search links for transport and accommodation.
+
+async function generate_links_node(state: State): Promise<Partial<State>> {
+  const match = state.itinerary?.match;
+  const { origin_city, travel_dates } = state.user_preferences as UserPreferences;
+
+  if (!match || !travel_dates) {
+    const reply = 'Something went wrong putting your trip together. Please start over.';
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const matchCity = match.match_city ?? match.venue;
+  const { checkIn, checkOut } = travel_dates;
+
+  const transportUrl = buildTransportUrl(origin_city, matchCity, checkIn, checkOut);
+  const accommodationUrl = buildAccommodationUrl(matchCity, checkIn, checkOut);
+
+  const links: FreeTierLinks = {
+    transportUrl,
+    accommodationUrl,
+    matchCity,
+    checkIn,
+    checkOut,
+  };
+
+  const reply =
+    `Here's your trip to ${match.homeTeam} vs ${match.awayTeam} in ${matchCity}! ` +
+    `I've put together search links for flights from ${origin_city} and accommodation — tap below to explore your options.`;
+
+  return {
+    free_tier_links: links,
+    direct_reply: reply,
+    messages: [new AIMessage(reply)],
+  } as Partial<State>;
 }
 
 // ─── Node: search_matches_node ────────────────────────────────────────────────
