@@ -6,6 +6,7 @@ import type {
   ChatApiRequest,
   ChatStreamEvent,
   FormattedItinerary,
+  FreeTierLinks,
 } from '@/lib/langchain/types';
 
 export const runtime = 'nodejs';
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
 
         let directReply: string | null = null;
         let formatted: FormattedItinerary | null = null;
+        let links: FreeTierLinks | null = null;
 
         for await (const chunk of graphStream) {
           const nodeName = Object.keys(chunk)[0] as string;
@@ -102,7 +104,7 @@ export async function POST(request: Request) {
           formatted?.summary ??
           'I was unable to help. Please try again.';
 
-        send({ type: 'done', reply, itinerary: formatted });
+        send({ type: 'done', reply, itinerary: formatted, links });
       } catch (err) {
         console.error('[api/chat] Graph invocation failed:', err);
         send({ type: 'error', message: 'Something went wrong. Please try again.' });

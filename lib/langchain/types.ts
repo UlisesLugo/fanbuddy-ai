@@ -1,6 +1,26 @@
 // ─── Shared TypeScript interfaces ───────────────────────────────────────────
 // Pure types only — no server-only imports. Safe to use in client components.
 
+// ── User preferences (persisted via checkpointer) ────────────────────────────
+
+export interface UserPreferences {
+  origin_city: string;
+  favorite_team: string;
+  selected_match_id: string | null; // 1-based index string e.g. "2"
+  travel_dates: { checkIn: string; checkOut: string } | null; // "YYYY-MM-DD"
+  spending_tier: 'luxury' | 'value' | 'budget' | null;
+}
+
+// ── Free-tier link output ─────────────────────────────────────────────────────
+
+export interface FreeTierLinks {
+  transportUrl: string;      // Google Flights search URL
+  accommodationUrl: string;  // Booking.com search URL
+  matchCity: string;
+  checkIn: string;           // "YYYY-MM-DD"
+  checkOut: string;          // "YYYY-MM-DD"
+}
+
 // ── Formatted output (frontend-facing) ──────────────────────────────────────
 
 export interface MatchCard {
@@ -15,10 +35,10 @@ export interface MatchCard {
 }
 
 export interface FlightLeg {
-  origin: string; // IATA e.g. "LHR"
-  destination: string; // IATA e.g. "MAD"
-  departureUtc: string; // ISO-8601
-  arrivalUtc: string; // ISO-8601
+  origin: string;
+  destination: string;
+  departureUtc: string;
+  arrivalUtc: string;
   airline: string;
   direct: boolean;
   priceEur: number;
@@ -33,8 +53,8 @@ export interface FlightCard {
 export interface HotelCard {
   name: string;
   city: string;
-  checkIn: string; // "YYYY-MM-DD"
-  checkOut: string; // "YYYY-MM-DD"
+  checkIn: string;
+  checkOut: string;
   nights: number;
   pricePerNightEur: number;
   totalEur: number;
@@ -57,7 +77,7 @@ export interface FormattedItinerary {
   cost: CostBreakdown;
   validationStatus: ValidationStatus;
   validationNotes: string[];
-  summary: string; // Friendly LLM-generated text reply
+  summary: string;
 }
 
 // ── Internal graph types (raw tool outputs) ──────────────────────────────────
@@ -75,6 +95,7 @@ export interface RawMatchFixture {
   nearestAirportCode?: string;
   lat?: number;
   lng?: number;
+  match_city?: string; // city name from geocoding, used by generate_links_node
 }
 
 export interface RawFlightOption {
@@ -90,7 +111,7 @@ export interface RawHotelOption {
   nights: number;
   pricePerNightEur: number;
   totalEur: number;
-  wasDowngraded: boolean; // true when budget pressure caused a lower-ranked hotel to be selected
+  wasDowngraded: boolean;
 }
 
 export interface ItineraryData {
@@ -104,13 +125,10 @@ export interface ItineraryData {
 export interface ChatApiRequest {
   message: string;
   thread_id: string;
-  user_preferences?: {
-    origin_city: string;
-    favorite_team: string;
-  };
+  user_preferences?: UserPreferences;
 }
 
 export type ChatStreamEvent =
   | { type: 'status'; message: string }
-  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null }
+  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null; links: FreeTierLinks | null }
   | { type: 'error'; message: string };
