@@ -33,6 +33,8 @@ The AI backend lives in `lib/langchain/` and is exposed via `app/api/chat/route.
 | `lib/langchain/graph.ts` | LangGraph `StateGraph` definition — all nodes, edges, and the compiled graph |
 | `lib/langchain/types.ts` | Shared TypeScript interfaces (safe to import in client components) |
 | `lib/football-data.ts` | football-data.org v4 API client — fixture search, geocoding, retry logic, telemetry |
+| `lib/flights.ts` | Duffel API v2 client — round-trip flight search (`searchRoundTrip`) |
+| `lib/hotels.ts` | LiteAPI v3 client — two-step hotel search (`searchHotels`): `GET /data/hotels` then `POST /hotels/rates` |
 | `app/api/chat/route.ts` | Next.js POST handler — runs the graph, streams SSE back to the client |
 
 ### Graph topology
@@ -58,7 +60,7 @@ START
 |------|-------------|
 | `router_node` | Extracts `origin_city` and `favorite_team` from the user's message using `withStructuredOutput`. Merges extracted values with checkpointed preferences — null means "keep prior value". |
 | `search_matches_node` | Gates on both preferences being present. If either is missing, sets `direct_reply` with a prompt and ends early. If the team is unsupported, returns an error message. Otherwise calls `searchFixtures()` from `lib/football-data.ts` for the next 90 days, picks the nearest fixture, and geocodes the venue. |
-| `plan_travel_node` | Calls mock `search_flights` + `search_hotels` tools directly. Runs a deterministic budget check and downgrades the hotel via `downgrade_hotel` if the total exceeds €800. |
+| `plan_travel_node` | Calls `searchRoundTrip` (Duffel) and `searchHotels` (LiteAPI) directly. Runs a deterministic budget check — walks hotel results to find the best hotel that keeps flight + hotel total under €800. |
 | `validator_node` | Pure TypeScript validation: arrival buffer ≥ 6 h before kickoff, departure buffer ≥ 4 h after match end, TV schedule confirmed. Writes errors to `state.validation_errors`. **Do not modify.** |
 | `formatter_node` | Assembles `FormattedItinerary` from raw state in TypeScript. Calls the LLM **once** — only to generate the natural-language `summary` string. Adds the summary to `messages`. **Do not modify.** |
 
@@ -87,6 +89,23 @@ The graph is compiled with a `MemorySaver` checkpointer. Each browser session ge
 - Neither known → "Tell me which team and city…"
 - Team missing → "Which team would you like to watch?"
 - City missing → "What city are you travelling from?"
+
+### Hotel data
+
+`lib/hotels.ts` wraps the LiteAPI v3 API with a two-step search:
+
+1. `GET https://api.liteapi.travel/v3.0/data/hotels?latitude=…&longitude=…&radius=5000&limit=20` — fetches up to 20 hotels within 5 km of the venue
+2. `POST https://api.liteapi.travel/v3.0/hotels/rates` — fetches rates for those hotel IDs; body includes `hotelIds`, `occupancies`, `checkin`, `checkout`, `guestNationality`, `currency`
+
+Auth: `X-API-Key: $LITEAPI_API_KEY` header.
+
+Response parsing notes:
+- Rates are nested under `roomTypes[].rates[]` — the cheapest `retailRate.total[0].amount` across all room types is used
+- Cancellability: `cancellationPolicies.refundableTag === 'RFN'` → cancellable; `"NRFN"` → non-cancellable
+- `hotel.location` may be absent — `latitude`/`longitude` default to `null`
+- Empty response body from `/hotels/rates` (no inventory) is treated as `NO_HOTEL_AVAILABILITY`
+
+`HotelOption` fields populated: `id`, `name`, `starRating` (default 3), `totalPriceUSD`, `pricePerNight`, `currency`, `checkInDate`, `checkOutDate`, `nights`, `distanceFromVenueKm`, `cancellable`, `latitude`, `longitude`. `amenities` is always `[]` (not returned by this endpoint).
 
 ### Football data
 
