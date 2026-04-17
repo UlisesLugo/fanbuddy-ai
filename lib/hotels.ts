@@ -4,7 +4,7 @@ type LiteApiHotel = {
   id: string;
   name: string;
   starRating: number | null;
-  location: { latitude: number; longitude: number };
+  location?: { latitude: number; longitude: number };
   distance: number | null;
 };
 
@@ -192,8 +192,8 @@ export async function searchHotels(
       distanceFromVenueKm: hotel.distance ?? null,
       amenities: [],
       cancellable: cheapest.cancellable,
-      latitude: hotel.location.latitude,
-      longitude: hotel.location.longitude,
+      latitude: hotel.location?.latitude ?? null,
+      longitude: hotel.location?.longitude ?? null,
     });
   }
 
