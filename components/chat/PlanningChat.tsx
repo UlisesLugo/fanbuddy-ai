@@ -66,7 +66,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     role: 'ai',
     kind: 'text',
     time: formatMessageTime(new Date()),
-    body: "Hi! I'm FanBuddy, your personal football travel assistant. Tell me where you're travelling from and which team you want to watch — I'll find their next upcoming fixture and plan your trip around it.",
+    body: "Hi! I'm FanBuddy, your personal football travel assistant. Tell me which team you want to watch and I'll show you their next 5 upcoming fixtures — you pick the match, tell me your city and budget, and I'll find you flights and accommodation.",
   },
 ];
 
