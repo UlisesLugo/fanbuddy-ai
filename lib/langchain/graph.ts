@@ -255,13 +255,15 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
 
   const fixture = upcoming[index];
   const venueName = fixture.venue ?? `${fixture.homeTeam.name} Stadium`;
+  const originCity = state.user_preferences.origin_city;
   const [venueGeo, originGeo] = await Promise.all([
     geocodeVenue(venueName),
-    geocodeVenue(state.user_preferences.origin_city || venueName),
+    originCity ? geocodeVenue(originCity) : Promise.resolve(null),
   ]);
 
-  // Same-city guardrail
+  // Same-city guardrail — only fires when we have an origin city to compare
   if (
+    originCity &&
     venueGeo?.nearestAirportCode &&
     originGeo?.nearestAirportCode &&
     venueGeo.nearestAirportCode === originGeo.nearestAirportCode
