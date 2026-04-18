@@ -68,9 +68,24 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     role: 'ai',
     kind: 'text',
     time: formatMessageTime(new Date()),
-    body: "Hi! I'm FanBuddy, your personal football travel assistant. Tell me which team you want to watch and I'll show you their next 5 upcoming fixtures — you pick the match, tell me your city and budget, and I'll find you flights and accommodation.",
+    body: "Hi! I'm FanBuddy, your football travel assistant. Which team would you like to watch?",
   },
 ];
+
+function renderMarkdown(text: string) {
+  // Split on **bold** segments and render inline
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-semibold text-landing-on-surface">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
 
 function AiAvatar() {
   return (
@@ -104,8 +119,8 @@ function LinksBlock({
     <div className="flex max-w-[90%] gap-4">
       <AiAvatar />
       <div className="flex-1 space-y-4">
-        <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 leading-relaxed text-landing-on-surface">
-          {body}
+        <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-[15px] leading-[1.65] text-landing-on-surface/80">
+          {renderMarkdown(body)}
         </div>
         <div className="flex flex-col gap-3 sm:flex-row">
           <a
@@ -667,7 +682,7 @@ export function PlanningChat() {
                         key={m.id}
                         className="flex flex-col items-end space-y-3"
                       >
-                        <div className="max-w-[80%] rounded-2xl rounded-tr-none bg-landing-primary p-4 text-white shadow-sm">
+                        <div className="max-w-[80%] rounded-2xl rounded-tr-none bg-landing-primary px-5 py-4 text-[15px] leading-[1.65] text-white shadow-sm">
                           {m.body}
                         </div>
                         <span className="mr-1 text-[10px] text-landing-on-surface-variant/60">
@@ -680,11 +695,11 @@ export function PlanningChat() {
                     return (
                       <div key={m.id} className="flex max-w-[85%] gap-4">
                         <AiAvatar />
-                        <div className="space-y-3">
-                          <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 leading-relaxed text-landing-on-surface">
-                            {m.body}
+                        <div className="space-y-2">
+                          <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-[15px] leading-[1.65] text-landing-on-surface/80">
+                            {renderMarkdown(m.body)}
                           </div>
-                          <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">
+                          <span className="ml-1 text-[10px] text-landing-on-surface-variant/50">
                             {m.time}
                           </span>
                         </div>

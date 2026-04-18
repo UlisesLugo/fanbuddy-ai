@@ -160,12 +160,20 @@ async function router_node(state: State): Promise<Partial<State>> {
   const lastMessage = state.messages[state.messages.length - 1];
   const structured = model.withStructuredOutput(RouterSchema);
 
+  // Include the last AI message so the extractor can resolve ambiguous replies
+  // (e.g. "Barcelona" after "What city are you travelling from?" → origin_city, not team).
+  const priorAiMessages = state.messages.filter((m) => m._getType() === 'ai');
+  const lastAiMessage = priorAiMessages[priorAiMessages.length - 1];
+  const contextLine = lastAiMessage
+    ? `\nConversation context — the assistant just asked: "${lastAiMessage.content}"\n`
+    : '';
+
   const result = await structured.invoke(
     `You are an information extractor for FanBuddy.AI, a football trip planning app.
-
+${contextLine}
 Extract the following from the user's message if present:
-- origin_city: the city the user is travelling FROM. Null if not mentioned.
-- favorite_team: the football club the user wants to watch. Null if not mentioned.
+- origin_city: the city the user is travelling FROM. Null if not mentioned. Use the conversation context to resolve ambiguity — if the assistant just asked for the origin city and the user replied with a place name (even one that shares a name with a football club), treat it as origin_city.
+- favorite_team: the football club the user wants to watch. Null if not mentioned. Only extract this if the user is clearly referring to a team, not answering a question about where they live or travel from.
 - selected_match_id: a 1-based index if the user picks a match from a numbered list (e.g. "match 2" → "2"). Null if not mentioned.
 - spending_tier: "luxury", "value", or "budget" if the user expresses a spending preference. Null if not mentioned.
 - travel_dates: { checkIn, checkOut } in YYYY-MM-DD format if the user provides specific travel dates. Null if not mentioned.
@@ -309,13 +317,6 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
 
 async function collect_preferences_node(state: State): Promise<Partial<State>> {
   const { origin_city, spending_tier } = state.user_preferences;
-
-  if (!origin_city && !spending_tier) {
-    const reply =
-      "What city are you travelling from, and what's your spending style? " +
-      'Choose: **Luxury** (premium experience), **Value** (quality-price balance), or **Budget** (cheapest options).';
-    return { direct_reply: reply, messages: [new AIMessage(reply)] };
-  }
 
   if (!origin_city) {
     const reply = 'What city are you travelling from?';
