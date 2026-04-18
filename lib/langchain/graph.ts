@@ -346,7 +346,11 @@ async function confirm_dates_node(state: State): Promise<Partial<State>> {
       return { direct_reply: reply, messages: [new AIMessage(reply)] };
     }
 
-    const dates = recommendTravelDates(match.kickoffUtc, spending_tier!);
+    if (!spending_tier) {
+      const reply = 'Please choose a spending style first: Luxury, Value, or Budget.';
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
+    const dates = recommendTravelDates(match.kickoffUtc, spending_tier);
     return {
       user_preferences: {
         ...state.user_preferences,
@@ -403,6 +407,11 @@ async function generate_links_node(state: State): Promise<Partial<State>> {
     messages: [new AIMessage(reply)],
   };
 }
+
+// ─── Paid-tier nodes (not wired — reserved for future paid-tier flow) ─────────
+// The nodes below (search_matches_node, plan_travel_node, validator_node,
+// formatter_node) implement the original auto-planning flow using Duffel + LiteAPI.
+// They are intentionally excluded from the current graph topology. Do not delete.
 
 // ─── Node: search_matches_node ────────────────────────────────────────────────
 // Calls football-data.org directly — no LLM routing overhead for deterministic calls.
