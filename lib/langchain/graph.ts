@@ -20,12 +20,22 @@ import { searchRoundTrip, type FlightOption } from '../flights';
 import { searchHotels, type HotelOption } from '../hotels';
 
 import type {
+  FixtureSummary,
   FormattedItinerary,
+  FreeTierLinks,
   ItineraryData,
   RawFlightOption,
   RawHotelOption,
   RawMatchFixture,
+  UserPreferences,
 } from './types';
+
+import {
+  buildAccommodationUrl,
+  buildTransportUrl,
+  formatFixtureList,
+  recommendTravelDates,
+} from './free-tier';
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
@@ -37,7 +47,6 @@ const model = new ChatAnthropic({
 // ─── Graph State ──────────────────────────────────────────────────────────────
 
 const GraphState = Annotation.Root({
-  // Conversational history — user messages + AI replies only (no tool noise)
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
     default: () => [],
@@ -50,9 +59,15 @@ const GraphState = Annotation.Root({
     reducer: (_, y) => y,
     default: () => [],
   }),
-  user_preferences: Annotation<{ origin_city: string; favorite_team: string }>({
+  user_preferences: Annotation<UserPreferences>({
     reducer: (_, y) => y,
-    default: () => ({ origin_city: '', favorite_team: '' }),
+    default: () => ({
+      origin_city: '',
+      favorite_team: '',
+      selected_match_id: null,
+      travel_dates: null,
+      spending_tier: null,
+    }),
   }),
   attempt_count: Annotation<number>({
     reducer: (_, y) => y,
@@ -65,6 +80,14 @@ const GraphState = Annotation.Root({
   direct_reply: Annotation<string | null>({
     reducer: (_, y) => y,
     default: () => null,
+  }),
+  free_tier_links: Annotation<FreeTierLinks | null>({
+    reducer: (_, y) => y,
+    default: () => null,
+  }),
+  wants_date_recommendation: Annotation<boolean>({
+    reducer: (_, y) => y,
+    default: () => false,
   }),
   flight_results: Annotation<FlightOption[] | null>({
     reducer: (_, y) => y,
@@ -82,6 +105,10 @@ const GraphState = Annotation.Root({
     reducer: (_, y) => y,
     default: () => 0,
   }),
+  fixture_list: Annotation<FixtureSummary[] | null>({
+    reducer: (_, y) => y,
+    default: () => null,
+  }),
 });
 
 type State = typeof GraphState.State;
@@ -95,13 +122,37 @@ const RouterSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'City the user is travelling FROM (e.g. "London", "Berlin"). Null if not mentioned.',
+      'City the user is travelling FROM (e.g. "from London", "leaving Berlin"). Null if not mentioned.',
     ),
   favorite_team: z
     .string()
     .nullable()
     .describe(
-      'Football club the user wants to watch (e.g. "Barcelona", "Real Madrid"). Null if not mentioned.',
+      'Football club the user wants to watch (e.g. "watch Barcelona", "Real Madrid game"). Null if not mentioned.',
+    ),
+  selected_match_id: z
+    .string()
+    .nullable()
+    .describe(
+      'The 1-based index of the match the user selected from a numbered list (e.g. "I\'ll take match 3" → "3", "the second one" → "2"). Null if the user has not selected a match.',
+    ),
+  spending_tier: z
+    .enum(['luxury', 'value', 'budget'])
+    .nullable()
+    .describe(
+      'Spending preference: "luxury" (premium/high-end), "value" (quality-price balance), "budget" (cheapest option). Null if not mentioned.',
+    ),
+  travel_dates: z
+    .object({
+      checkIn: z.string().describe('Check-in date in YYYY-MM-DD format'),
+      checkOut: z.string().describe('Check-out date in YYYY-MM-DD format'),
+    })
+    .nullable()
+    .describe('Travel dates if the user provides specific dates. Null if not mentioned.'),
+  wants_date_recommendation: z
+    .boolean()
+    .describe(
+      'True if the user asks the agent to recommend dates or says "you decide" / "give me a recommendation". False otherwise.',
     ),
 });
 
@@ -109,26 +160,265 @@ async function router_node(state: State): Promise<Partial<State>> {
   const lastMessage = state.messages[state.messages.length - 1];
   const structured = model.withStructuredOutput(RouterSchema);
 
+  // Include the last AI message so the extractor can resolve ambiguous replies
+  // (e.g. "Barcelona" after "What city are you travelling from?" → origin_city, not team).
+  const priorAiMessages = state.messages.filter((m) => m._getType() === 'ai');
+  const lastAiMessage = priorAiMessages[priorAiMessages.length - 1];
+  const contextLine = lastAiMessage
+    ? `\nConversation context — the assistant just asked: "${lastAiMessage.content}"\n`
+    : '';
+
   const result = await structured.invoke(
     `You are an information extractor for FanBuddy.AI, a football trip planning app.
-
+${contextLine}
 Extract the following from the user's message if present:
-- origin_city: the city the user is travelling FROM (e.g. "from London", "leaving Berlin"). Set null if not mentioned.
-- favorite_team: the football club the user wants to watch (e.g. "watch Barcelona", "Real Madrid game"). Set null if not mentioned.
+- origin_city: the city the user is travelling FROM. Null if not mentioned. Use the conversation context to resolve ambiguity — if the assistant just asked for the origin city and the user replied with a place name (even one that shares a name with a football club), treat it as origin_city.
+- favorite_team: the football club the user wants to watch. Null if not mentioned. Only extract this if the user is clearly referring to a team, not answering a question about where they live or travel from.
+- selected_match_id: a 1-based index if the user picks a match from a numbered list (e.g. "match 2" → "2"). Null if not mentioned.
+- spending_tier: "luxury", "value", or "budget" if the user expresses a spending preference. Null if not mentioned.
+- travel_dates: { checkIn, checkOut } in YYYY-MM-DD format if the user provides specific travel dates. Null if not mentioned.
+- wants_date_recommendation: true ONLY if the user explicitly asks you to recommend dates or says "you decide". false otherwise.
 
 User message: "${lastMessage.content}"`,
   );
 
-  // Only overwrite a preference when the user explicitly mentions it;
-  // otherwise keep the value that was persisted from a previous turn.
   return {
     user_preferences: {
       origin_city: result.origin_city ?? state.user_preferences.origin_city,
-      favorite_team:
-        result.favorite_team ?? state.user_preferences.favorite_team,
+      favorite_team: result.favorite_team ?? state.user_preferences.favorite_team,
+      selected_match_id: result.selected_match_id ?? state.user_preferences.selected_match_id ?? null,
+      travel_dates: result.travel_dates ?? state.user_preferences.travel_dates ?? null,
+      spending_tier: result.spending_tier ?? state.user_preferences.spending_tier ?? null,
+    },
+    wants_date_recommendation: result.wants_date_recommendation,
+  };
+}
+
+// ─── Node: list_matches_node ──────────────────────────────────────────────────
+// Shows the next 5 upcoming fixtures when no match is selected yet.
+// When a match is already selected, geocodes the venue and sets itinerary.match.
+
+async function list_matches_node(state: State): Promise<Partial<State>> {
+  const { favorite_team: teamName, selected_match_id } = state.user_preferences;
+
+  if (!teamName) {
+    const reply = "Which football team would you like to watch? I'll find their upcoming fixtures.";
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const teamId = resolveTeamId(teamName);
+  if (!teamId) {
+    const reply = `Sorry, ${teamName} isn't supported yet. Try a club like Real Madrid, Barcelona, Liverpool, or Manchester City.`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const today = new Date();
+  const minPlanDate = new Date(today);
+  minPlanDate.setDate(today.getDate() + 2);
+  const ninetyDaysOut = new Date(today);
+  ninetyDaysOut.setDate(today.getDate() + 90);
+  const dateFrom = minPlanDate.toISOString().slice(0, 10);
+  const dateTo = ninetyDaysOut.toISOString().slice(0, 10);
+
+  let fixtures;
+  try {
+    fixtures = await searchFixtures(teamId, dateFrom, dateTo);
+  } catch (err) {
+    console.error('[list_matches_node] football-data.org call failed:', err);
+    const reply = 'I had trouble fetching fixtures right now. Please try again in a moment.';
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const upcoming = fixtures.slice(0, 5);
+
+  if (upcoming.length === 0) {
+    const reply = `No upcoming fixtures found for ${teamName} in the next 90 days.`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  // No match selected yet — return the numbered list
+  if (!selected_match_id) {
+    const summaries: FixtureSummary[] = upcoming.map((f) => ({
+      homeTeam: f.homeTeam.name,
+      awayTeam: f.awayTeam.name,
+      kickoffUtc: f.utcDate,
+      competition: f.competition.name,
+      venue: f.venue,
+    }));
+    const reply = formatFixtureList(summaries);
+    return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
+  }
+
+  // Match selected — resolve by 1-based index
+  const index = parseInt(selected_match_id, 10) - 1;
+  if (isNaN(index) || index < 0 || index >= upcoming.length) {
+    const summaries: FixtureSummary[] = upcoming.map((f) => ({
+      homeTeam: f.homeTeam.name,
+      awayTeam: f.awayTeam.name,
+      kickoffUtc: f.utcDate,
+      competition: f.competition.name,
+      venue: f.venue,
+    }));
+    const reply =
+      `I didn't catch which match you meant. Here are the options again:\n\n` +
+      formatFixtureList(summaries);
+    return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
+  }
+
+  const fixture = upcoming[index];
+  const venueName = fixture.venue ?? `${fixture.homeTeam.name} Stadium`;
+  const originCity = state.user_preferences.origin_city;
+  const [venueGeo, originGeo] = await Promise.all([
+    geocodeVenue(venueName),
+    originCity ? geocodeVenue(originCity) : Promise.resolve(null),
+  ]);
+
+  // Same-city guardrail — only fires when we have an origin city to compare
+  if (
+    originCity &&
+    venueGeo?.nearestAirportCode &&
+    originGeo?.nearestAirportCode &&
+    venueGeo.nearestAirportCode === originGeo.nearestAirportCode
+  ) {
+    const reply =
+      `The next ${fixture.homeTeam.name} match is at ${venueName} — ` +
+      `that's right in ${state.user_preferences.origin_city}! No travel needed for a home game. ` +
+      `Would you like to plan a trip to an away match instead?`;
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const match: RawMatchFixture = {
+    id: String(fixture.id),
+    league: fixture.competition.name,
+    matchday: 'Matchday',
+    homeTeam: fixture.homeTeam.name,
+    awayTeam: fixture.awayTeam.name,
+    venue: venueName,
+    kickoffUtc: fixture.utcDate,
+    ticketPriceEur: 0,
+    tvConfirmed: toFanBuddyStatus(fixture.status) === 'CONFIRMED',
+    match_city: venueGeo?.city ?? venueName,
+    ...(venueGeo
+      ? { lat: venueGeo.lat, lng: venueGeo.lng, nearestAirportCode: venueGeo.nearestAirportCode }
+      : {}),
+  };
+
+  return {
+    itinerary: {
+      match,
+      flight: state.itinerary?.flight ?? null,
+      hotel: state.itinerary?.hotel ?? null,
     },
   };
 }
+
+// ─── Node: collect_preferences_node ──────────────────────────────────────────
+// Gates on origin_city and spending_tier both being present.
+
+async function collect_preferences_node(state: State): Promise<Partial<State>> {
+  const { origin_city, spending_tier } = state.user_preferences;
+
+  if (!origin_city) {
+    const reply = 'What city are you travelling from?';
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  if (!spending_tier) {
+    const reply =
+      "What's your spending style? Choose: **Luxury** (premium experience), **Value** (quality-price balance), or **Budget** (cheapest options).";
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  return {};
+}
+
+// ─── Node: confirm_dates_node ─────────────────────────────────────────────────
+// If travel_dates are already set, passes through.
+// If wants_date_recommendation is true, computes dates from spending_tier.
+// Otherwise, asks the user for dates.
+
+async function confirm_dates_node(state: State): Promise<Partial<State>> {
+  const { travel_dates, spending_tier } = state.user_preferences;
+
+  // Already have dates — pass through
+  if (travel_dates) {
+    return {};
+  }
+
+  // User asked for a recommendation — compute dates from spending tier
+  if (state.wants_date_recommendation) {
+    const match = state.itinerary?.match;
+    if (!match) {
+      const reply = 'I lost track of the match details. Could you pick a match again?';
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
+
+    if (!spending_tier) {
+      const reply = 'Please choose a spending style first: Luxury, Value, or Budget.';
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
+    const dates = recommendTravelDates(match.kickoffUtc, spending_tier);
+    return {
+      user_preferences: {
+        ...state.user_preferences,
+        travel_dates: dates,
+      },
+    };
+  }
+
+  // Ask for dates
+  const match = state.itinerary?.match;
+  const kickoffHint = match
+    ? ` The match is on ${new Date(match.kickoffUtc).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}.`
+    : '';
+
+  const reply =
+    `Do you know when you'd like to travel?${kickoffHint} ` +
+    `You can give me specific dates (e.g. "Apr 19 to Apr 22"), or just say **"recommend dates"** and I'll suggest based on your ${spending_tier} budget.`;
+  return { direct_reply: reply, messages: [new AIMessage(reply)] };
+}
+
+// ─── Node: generate_links_node ────────────────────────────────────────────────
+// Builds free-tier search links for transport and accommodation.
+
+async function generate_links_node(state: State): Promise<Partial<State>> {
+  const match = state.itinerary?.match;
+  const { origin_city, travel_dates } = state.user_preferences;
+
+  if (!match || !travel_dates) {
+    const reply = 'Something went wrong putting your trip together. Please start over.';
+    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  }
+
+  const matchCity = match.match_city ?? match.venue;
+  const { checkIn, checkOut } = travel_dates;
+
+  const transportUrl = buildTransportUrl(origin_city, matchCity, checkIn, checkOut);
+  const accommodationUrl = buildAccommodationUrl(matchCity, checkIn, checkOut);
+
+  const links: FreeTierLinks = {
+    transportUrl,
+    accommodationUrl,
+    matchCity,
+    checkIn,
+    checkOut,
+  };
+
+  const reply =
+    `Here's your trip to ${match.homeTeam} vs ${match.awayTeam} in ${matchCity}! ` +
+    `I've put together search links for flights from ${origin_city} and accommodation — tap below to explore your options.`;
+
+  return {
+    free_tier_links: links,
+    direct_reply: reply,
+    messages: [new AIMessage(reply)],
+  };
+}
+
+// ─── Paid-tier nodes (not wired — reserved for future paid-tier flow) ─────────
+// The nodes below (search_matches_node, plan_travel_node, validator_node,
+// formatter_node) implement the original auto-planning flow using Duffel + LiteAPI.
+// They are intentionally excluded from the current graph topology. Do not delete.
 
 // ─── Node: search_matches_node ────────────────────────────────────────────────
 // Calls football-data.org directly — no LLM routing overhead for deterministic calls.
@@ -589,28 +879,11 @@ Flight: ${itinerary.flight.outbound.airline}, €${flightsEur}. Hotel: ${itinera
 
 // ─── Conditional Edges ────────────────────────────────────────────────────────
 
-// Short-circuit to END if search_matches_node returned a prompt (missing data / unsupported team).
-function afterSearchMatches(state: State): 'plan_travel_node' | typeof END {
-  return state.direct_reply ? END : 'plan_travel_node';
-}
-
-function shouldRetryOrFinish(
+function afterDirectReply(
   state: State,
-): 'plan_travel_node' | 'formatter_node' {
-  // Cursor exhausted — no more cached flights to try
-  if (
-    state.flight_results !== null &&
-    state.flight_results_cursor >= state.flight_results.length
-  ) {
-    return 'formatter_node';
-  }
-  const hardErrors = state.validation_errors.filter(
-    (e) => !e.includes('PROVISIONAL'),
-  );
-  if (hardErrors.length > 0 && state.attempt_count < 3) {
-    return 'plan_travel_node';
-  }
-  return 'formatter_node';
+  nextNode: string,
+): string | typeof END {
+  return state.direct_reply ? END : nextNode;
 }
 
 // ─── Graph Assembly ───────────────────────────────────────────────────────────
@@ -619,22 +892,28 @@ const checkpointer = new MemorySaver();
 
 const graph = new StateGraph(GraphState)
   .addNode('router_node', router_node)
-  .addNode('search_matches_node', search_matches_node)
-  .addNode('plan_travel_node', plan_travel_node)
-  .addNode('validator_node', validator_node)
-  .addNode('formatter_node', formatter_node)
+  .addNode('list_matches_node', list_matches_node)
+  .addNode('collect_preferences_node', collect_preferences_node)
+  .addNode('confirm_dates_node', confirm_dates_node)
+  .addNode('generate_links_node', generate_links_node)
   .addEdge(START, 'router_node')
-  .addEdge('router_node', 'search_matches_node')
-  .addConditionalEdges('search_matches_node', afterSearchMatches, {
-    plan_travel_node: 'plan_travel_node',
-    [END]: END,
-  })
-  .addEdge('plan_travel_node', 'validator_node')
-  .addConditionalEdges('validator_node', shouldRetryOrFinish, {
-    plan_travel_node: 'plan_travel_node',
-    formatter_node: 'formatter_node',
-  })
-  .addEdge('formatter_node', END)
+  .addEdge('router_node', 'list_matches_node')
+  .addConditionalEdges(
+    'list_matches_node',
+    (state) => afterDirectReply(state, 'collect_preferences_node'),
+    { collect_preferences_node: 'collect_preferences_node', [END]: END },
+  )
+  .addConditionalEdges(
+    'collect_preferences_node',
+    (state) => afterDirectReply(state, 'confirm_dates_node'),
+    { confirm_dates_node: 'confirm_dates_node', [END]: END },
+  )
+  .addConditionalEdges(
+    'confirm_dates_node',
+    (state) => afterDirectReply(state, 'generate_links_node'),
+    { generate_links_node: 'generate_links_node', [END]: END },
+  )
+  .addEdge('generate_links_node', END)
   .compile({ checkpointer });
 
 export { graph };

@@ -206,6 +206,7 @@ describe('geocodeVenue', () => {
     expect(result!.lat).toBeCloseTo(40.453054);
     expect(result!.lng).toBeCloseTo(-3.688344);
     expect(result!.nearestAirportCode).toBe('MAD');
+    expect(result!.city).toBe('Madrid');
   });
 
   it('returns null when GEOAPIFY_API_KEY is not set', async () => {

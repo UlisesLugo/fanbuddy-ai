@@ -24,6 +24,7 @@ export interface GeocodedVenue {
   lat: number;
   lng: number;
   nearestAirportCode: string;
+  city: string; // human-readable city name from Geoapify
 }
 
 // ─── Team name → football-data.org ID map ────────────────────────────────────
@@ -268,6 +269,7 @@ export async function geocodeVenue(venueName: string): Promise<GeocodedVenue | n
       lat,
       lng,
       nearestAirportCode: nearestAirportFromCity(cityHint),
+      city: cityHint,
     };
   } catch (err) {
     console.warn('[football-data] geocodeVenue failed:', err);

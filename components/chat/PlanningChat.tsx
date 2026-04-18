@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   Bot,
+  Check,
   ChevronRight,
   Compass,
   CreditCard,
@@ -32,7 +33,7 @@ import {
   useState,
 } from 'react';
 
-import type { ChatStreamEvent, FormattedItinerary } from '@/lib/langchain/types';
+import type { ChatStreamEvent, FixtureSummary, FormattedItinerary, FreeTierLinks } from '@/lib/langchain/types';
 
 const USER_AVATAR =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAY1f4voJura_4QT6uFG36VKeOxxEFTPgk9SIJG5SLiLz4mSlL3s__8iX1WLU-t-FzIC52OJtcokCWu1eIjvveVmXeImFiAKczjvtnIEHu14jY6kwwxDtHGTG19s4Jp9WLYwJ-pLN6oo5xKzyRWnV7-XHzF8EfYEES-dQ3-w1bTZUjfoy7-Hko3uGnK_8Z8du14k-ePf6VnsvtSDVdcTWU1eQJU1fb0VPFK7spKvqO7rWoyRzJeMVAsAlLgspk9UerYkBrJLI4x-Fg';
@@ -57,7 +58,9 @@ function newId() {
 type ChatMessage =
   | { id: string; role: 'ai'; kind: 'text'; body: string; time: string }
   | { id: string; role: 'user'; body: string; time: string }
-  | { id: string; role: 'ai'; kind: 'cards'; time: string; itinerary: FormattedItinerary | null };
+  | { id: string; role: 'ai'; kind: 'cards'; time: string; itinerary: FormattedItinerary | null }
+  | { id: string; role: 'ai'; kind: 'links'; time: string; body: string; links: FreeTierLinks }
+  | { id: string; role: 'ai'; kind: 'fixtures'; time: string; body: string; fixtures: FixtureSummary[] };
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -65,9 +68,24 @@ const INITIAL_MESSAGES: ChatMessage[] = [
     role: 'ai',
     kind: 'text',
     time: formatMessageTime(new Date()),
-    body: "Hi! I'm FanBuddy, your personal football travel assistant. Tell me where you're travelling from and which team you want to watch — I'll find their next upcoming fixture and plan your trip around it.",
+    body: "Hi! I'm FanBuddy, your football travel assistant. Which team would you like to watch?",
   },
 ];
+
+function renderMarkdown(text: string) {
+  // Split on **bold** segments and render inline
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-semibold text-landing-on-surface">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
 
 function AiAvatar() {
   return (
@@ -86,6 +104,141 @@ function formatDate(isoUtc: string) {
   } catch {
     return isoUtc;
   }
+}
+
+function LinksBlock({
+  time,
+  body,
+  links,
+}: {
+  time: string;
+  body: string;
+  links: FreeTierLinks;
+}) {
+  return (
+    <div className="flex max-w-[90%] gap-4">
+      <AiAvatar />
+      <div className="flex-1 space-y-4">
+        <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-[15px] leading-[1.65] text-landing-on-surface/80">
+          {renderMarkdown(body)}
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <a
+            href={links.transportUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-xl bg-landing-primary px-5 py-3 text-sm font-bold text-white shadow-md transition-transform hover:opacity-90 active:scale-95"
+          >
+            <Plane className="size-4 shrink-0" strokeWidth={2} />
+            Search Transport
+          </a>
+          <a
+            href={links.accommodationUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-landing-primary px-5 py-3 text-sm font-bold text-landing-primary transition-transform hover:bg-landing-primary/5 active:scale-95"
+          >
+            <Hotel className="size-4 shrink-0" strokeWidth={2} />
+            Search Accommodation
+          </a>
+        </div>
+        <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">{time}</span>
+      </div>
+    </div>
+  );
+}
+
+function FixtureCardsBlock({
+  time,
+  body,
+  fixtures,
+  onSelect,
+}: {
+  time: string;
+  body: string;
+  fixtures: FixtureSummary[];
+  onSelect: (n: number) => void;
+}) {
+  const [selected, setSelected] = useState<number | null>(null);
+
+  function handleSelect(n: number) {
+    setSelected(n);
+    onSelect(n);
+  }
+
+  return (
+    <div className="flex max-w-[90%] gap-4">
+      <AiAvatar />
+      <div className="flex-1 space-y-4">
+        <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 leading-relaxed text-landing-on-surface">
+          Here are the next upcoming fixtures — tap a match to plan your trip:
+        </div>
+        <div className="flex flex-col gap-3">
+          {fixtures.map((f, i) => {
+            const parsed = new Date(f.kickoffUtc);
+            const dateStr = isNaN(parsed.getTime())
+              ? f.kickoffUtc
+              : parsed.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+            const timeStr = isNaN(parsed.getTime())
+              ? ''
+              : parsed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+            const isSelected = selected === i + 1;
+            const isDimmed = selected !== null && !isSelected;
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={selected !== null}
+                onClick={() => handleSelect(i + 1)}
+                className={[
+                  'group relative flex items-center gap-4 rounded-2xl border px-4 py-3.5 text-left shadow-sm transition-all duration-200',
+                  isSelected
+                    ? 'border-landing-primary bg-landing-primary/5 shadow-md'
+                    : isDimmed
+                      ? 'border-landing-outline-variant/10 bg-white/50 opacity-40'
+                      : 'border-landing-outline-variant/15 bg-white hover:border-landing-primary/30 hover:shadow-md active:scale-[0.98]',
+                ].join(' ')}
+              >
+                <span className={[
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-headline text-sm font-black transition-colors',
+                  isSelected
+                    ? 'bg-landing-primary text-white'
+                    : 'bg-landing-primary/10 text-landing-primary group-hover:bg-landing-primary group-hover:text-white',
+                ].join(' ')}>
+                  {i + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-sm font-bold text-landing-on-surface">
+                    {f.homeTeam} <span className="font-normal text-landing-on-surface-variant">vs</span> {f.awayTeam}
+                  </p>
+                  <div className="mt-0.5 flex items-center gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-landing-primary/70">
+                      {f.competition}
+                    </span>
+                    {f.venue && (
+                      <>
+                        <span className="text-landing-outline-variant/40">·</span>
+                        <span className="truncate text-[10px] text-landing-on-surface-variant">{f.venue}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-xs font-semibold text-landing-on-surface">{dateStr}</p>
+                  {timeStr && <p className="text-[10px] text-landing-on-surface-variant">{timeStr} UTC</p>}
+                </div>
+                {isSelected
+                  ? <Check className="size-4 shrink-0 text-landing-primary" strokeWidth={2.5} />
+                  : <ChevronRight className="size-4 shrink-0 text-landing-on-surface-variant/40 transition-colors group-hover:text-landing-primary" strokeWidth={2} />
+                }
+              </button>
+            );
+          })}
+        </div>
+        <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">{time}</span>
+      </div>
+    </div>
+  );
 }
 
 function RichCardsBlock({
@@ -299,6 +452,34 @@ export function PlanningChat() {
     ]);
   }, []);
 
+  const pushAiLinks = useCallback((body: string, links: FreeTierLinks) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        role: 'ai',
+        kind: 'links',
+        body,
+        time: formatMessageTime(new Date()),
+        links,
+      },
+    ]);
+  }, []);
+
+  const pushAiFixtures = useCallback((body: string, fixtures: FixtureSummary[]) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        role: 'ai',
+        kind: 'fixtures',
+        body,
+        time: formatMessageTime(new Date()),
+        fixtures,
+      },
+    ]);
+  }, []);
+
   const handleSendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -341,7 +522,13 @@ export function PlanningChat() {
               if (event.type === 'status') {
                 setLoadingMessage(event.message);
               } else if (event.type === 'done') {
-                pushAiText(event.reply);
+                if (event.fixtures && event.fixtures.length > 0) {
+                  pushAiFixtures(event.reply, event.fixtures);
+                } else if (event.links) {
+                  pushAiLinks(event.reply, event.links);
+                } else {
+                  pushAiText(event.reply);
+                }
                 if (event.itinerary) {
                   pushAiCards(event.itinerary);
                   setCurrentItinerary(event.itinerary);
@@ -361,7 +548,7 @@ export function PlanningChat() {
         setLoadingMessage('FanBuddy is planning your trip...');
       }
     },
-    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards],
+    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks, pushAiFixtures],
   );
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -495,7 +682,7 @@ export function PlanningChat() {
                         key={m.id}
                         className="flex flex-col items-end space-y-3"
                       >
-                        <div className="max-w-[80%] rounded-2xl rounded-tr-none bg-landing-primary p-4 text-white shadow-sm">
+                        <div className="max-w-[80%] rounded-2xl rounded-tr-none bg-landing-primary px-5 py-4 text-[15px] leading-[1.65] text-white shadow-sm">
                           {m.body}
                         </div>
                         <span className="mr-1 text-[10px] text-landing-on-surface-variant/60">
@@ -508,15 +695,36 @@ export function PlanningChat() {
                     return (
                       <div key={m.id} className="flex max-w-[85%] gap-4">
                         <AiAvatar />
-                        <div className="space-y-3">
-                          <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 leading-relaxed text-landing-on-surface">
-                            {m.body}
+                        <div className="space-y-2">
+                          <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-[15px] leading-[1.65] text-landing-on-surface/80">
+                            {renderMarkdown(m.body)}
                           </div>
-                          <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">
+                          <span className="ml-1 text-[10px] text-landing-on-surface-variant/50">
                             {m.time}
                           </span>
                         </div>
                       </div>
+                    );
+                  }
+                  if (m.role === 'ai' && m.kind === 'fixtures') {
+                    return (
+                      <FixtureCardsBlock
+                        key={m.id}
+                        time={m.time}
+                        body={m.body}
+                        fixtures={m.fixtures}
+                        onSelect={(n) => handleSendMessage(String(n))}
+                      />
+                    );
+                  }
+                  if (m.role === 'ai' && m.kind === 'links') {
+                    return (
+                      <LinksBlock
+                        key={m.id}
+                        time={m.time}
+                        body={m.body}
+                        links={m.links}
+                      />
                     );
                   }
                   if (!m.itinerary) return null;

@@ -5,7 +5,9 @@ import { graph } from '@/lib/langchain/graph';
 import type {
   ChatApiRequest,
   ChatStreamEvent,
+  FixtureSummary,
   FormattedItinerary,
+  FreeTierLinks,
 } from '@/lib/langchain/types';
 
 export const runtime = 'nodejs';
@@ -14,10 +16,11 @@ export const maxDuration = 60;
 // Status message shown to the user after each node in the pipeline completes.
 // Keys are node names; the message describes what's happening NEXT.
 const NODE_STATUS: Record<string, string> = {
-  router_node: 'Searching for upcoming fixtures...',
-  search_matches_node: 'Planning your travel...',
-  plan_travel_node: 'Validating your itinerary...',
-  validator_node: 'Finalizing your trip...',
+  router_node: 'Finding upcoming fixtures...',
+  list_matches_node: 'Loaded fixtures...',
+  collect_preferences_node: 'Got your preferences...',
+  confirm_dates_node: 'Confirmed your dates...',
+  generate_links_node: 'Building your trip links...',
 };
 
 export async function POST(request: Request) {
@@ -69,6 +72,8 @@ export async function POST(request: Request) {
           attempt_count: 0,
           formatted: null,
           direct_reply: null,
+          free_tier_links: null,
+          wants_date_recommendation: false,
         };
 
         const graphStream = await graph.stream(initialState, {
@@ -78,6 +83,8 @@ export async function POST(request: Request) {
 
         let directReply: string | null = null;
         let formatted: FormattedItinerary | null = null;
+        let links: FreeTierLinks | null = null;
+        let fixtures: FixtureSummary[] | null = null;
 
         for await (const chunk of graphStream) {
           const nodeName = Object.keys(chunk)[0] as string;
@@ -89,6 +96,12 @@ export async function POST(request: Request) {
           }
           if (update.formatted != null) {
             formatted = update.formatted as FormattedItinerary;
+          }
+          if (update.free_tier_links != null) {
+            links = update.free_tier_links as FreeTierLinks;
+          }
+          if (update.fixture_list != null) {
+            fixtures = update.fixture_list as FixtureSummary[];
           }
 
           // Emit status based on which node just finished
@@ -102,7 +115,7 @@ export async function POST(request: Request) {
           formatted?.summary ??
           'I was unable to help. Please try again.';
 
-        send({ type: 'done', reply, itinerary: formatted });
+        send({ type: 'done', reply, itinerary: formatted, links, fixtures });
       } catch (err) {
         console.error('[api/chat] Graph invocation failed:', err);
         send({ type: 'error', message: 'Something went wrong. Please try again.' });
