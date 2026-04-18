@@ -115,7 +115,7 @@ export async function POST(request: Request) {
           formatted?.summary ??
           'I was unable to help. Please try again.';
 
-        send({ type: 'done', reply, itinerary: formatted, links, fixtures });
+        send({ type: 'done', reply, itinerary: formatted, links, fixtures, activities: null });
       } catch (err) {
         console.error('[api/chat] Graph invocation failed:', err);
         send({ type: 'error', message: 'Something went wrong. Please try again.' });

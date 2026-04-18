@@ -90,6 +90,26 @@ export interface FormattedItinerary {
   summary: string;
 }
 
+export interface ActivityItem {
+  name: string;
+  category: 'football' | 'culture' | 'food' | 'sightseeing';
+  description: string;
+  estimatedDuration: string;
+  tip?: string;
+}
+
+export interface DayActivities {
+  day: 'arrival' | 'match' | 'departure';
+  date: string;
+  label: string;
+  activities: ActivityItem[];
+}
+
+export interface ActivitiesData {
+  city: string;
+  days: DayActivities[];
+}
+
 // ── Internal graph types (raw tool outputs) ──────────────────────────────────
 
 export interface RawMatchFixture {
@@ -140,5 +160,5 @@ export interface ChatApiRequest {
 
 export type ChatStreamEvent =
   | { type: 'status'; message: string }
-  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null; links: FreeTierLinks | null; fixtures: FixtureSummary[] | null }
+  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null; links: FreeTierLinks | null; fixtures: FixtureSummary[] | null; activities: ActivitiesData | null }
   | { type: 'error'; message: string };
