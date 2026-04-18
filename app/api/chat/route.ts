@@ -5,6 +5,7 @@ import { graph } from '@/lib/langchain/graph';
 import type {
   ChatApiRequest,
   ChatStreamEvent,
+  FixtureSummary,
   FormattedItinerary,
   FreeTierLinks,
 } from '@/lib/langchain/types';
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
         let directReply: string | null = null;
         let formatted: FormattedItinerary | null = null;
         let links: FreeTierLinks | null = null;
+        let fixtures: FixtureSummary[] | null = null;
 
         for await (const chunk of graphStream) {
           const nodeName = Object.keys(chunk)[0] as string;
@@ -98,6 +100,9 @@ export async function POST(request: Request) {
           if (update.free_tier_links != null) {
             links = update.free_tier_links as FreeTierLinks;
           }
+          if (update.fixture_list != null) {
+            fixtures = update.fixture_list as FixtureSummary[];
+          }
 
           // Emit status based on which node just finished
           if (NODE_STATUS[nodeName]) {
@@ -110,7 +115,7 @@ export async function POST(request: Request) {
           formatted?.summary ??
           'I was unable to help. Please try again.';
 
-        send({ type: 'done', reply, itinerary: formatted, links });
+        send({ type: 'done', reply, itinerary: formatted, links, fixtures });
       } catch (err) {
         console.error('[api/chat] Graph invocation failed:', err);
         send({ type: 'error', message: 'Something went wrong. Please try again.' });

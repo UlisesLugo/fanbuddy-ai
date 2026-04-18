@@ -1,6 +1,16 @@
 // ─── Shared TypeScript interfaces ───────────────────────────────────────────
 // Pure types only — no server-only imports. Safe to use in client components.
 
+// ── Fixture summary (used for the match selection list) ──────────────────────
+
+export interface FixtureSummary {
+  homeTeam: string;
+  awayTeam: string;
+  kickoffUtc: string;
+  competition: string;
+  venue: string | null;
+}
+
 // ── User preferences (persisted via checkpointer) ────────────────────────────
 
 export interface UserPreferences {
@@ -130,5 +140,5 @@ export interface ChatApiRequest {
 
 export type ChatStreamEvent =
   | { type: 'status'; message: string }
-  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null; links: FreeTierLinks | null }
+  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null; links: FreeTierLinks | null; fixtures: FixtureSummary[] | null }
   | { type: 'error'; message: string };

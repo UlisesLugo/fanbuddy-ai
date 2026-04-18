@@ -20,6 +20,7 @@ import { searchRoundTrip, type FlightOption } from '../flights';
 import { searchHotels, type HotelOption } from '../hotels';
 
 import type {
+  FixtureSummary,
   FormattedItinerary,
   FreeTierLinks,
   ItineraryData,
@@ -34,7 +35,6 @@ import {
   buildTransportUrl,
   formatFixtureList,
   recommendTravelDates,
-  type FixtureSummary,
 } from './free-tier';
 
 // ─── Model ────────────────────────────────────────────────────────────────────
@@ -104,6 +104,10 @@ const GraphState = Annotation.Root({
   hotel_results_cursor: Annotation<number>({
     reducer: (_, y) => y,
     default: () => 0,
+  }),
+  fixture_list: Annotation<FixtureSummary[] | null>({
+    reducer: (_, y) => y,
+    default: () => null,
   }),
 });
 
@@ -234,7 +238,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       venue: f.venue,
     }));
     const reply = formatFixtureList(summaries);
-    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
   }
 
   // Match selected — resolve by 1-based index
@@ -250,7 +254,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
     const reply =
       `I didn't catch which match you meant. Here are the options again:\n\n` +
       formatFixtureList(summaries);
-    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
   }
 
   const fixture = upcoming[index];
