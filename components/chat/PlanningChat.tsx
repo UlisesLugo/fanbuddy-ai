@@ -32,7 +32,7 @@ import {
   useState,
 } from 'react';
 
-import type { ChatStreamEvent, FormattedItinerary } from '@/lib/langchain/types';
+import type { ChatStreamEvent, FormattedItinerary, FreeTierLinks } from '@/lib/langchain/types';
 
 const USER_AVATAR =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAY1f4voJura_4QT6uFG36VKeOxxEFTPgk9SIJG5SLiLz4mSlL3s__8iX1WLU-t-FzIC52OJtcokCWu1eIjvveVmXeImFiAKczjvtnIEHu14jY6kwwxDtHGTG19s4Jp9WLYwJ-pLN6oo5xKzyRWnV7-XHzF8EfYEES-dQ3-w1bTZUjfoy7-Hko3uGnK_8Z8du14k-ePf6VnsvtSDVdcTWU1eQJU1fb0VPFK7spKvqO7rWoyRzJeMVAsAlLgspk9UerYkBrJLI4x-Fg';
@@ -57,7 +57,8 @@ function newId() {
 type ChatMessage =
   | { id: string; role: 'ai'; kind: 'text'; body: string; time: string }
   | { id: string; role: 'user'; body: string; time: string }
-  | { id: string; role: 'ai'; kind: 'cards'; time: string; itinerary: FormattedItinerary | null };
+  | { id: string; role: 'ai'; kind: 'cards'; time: string; itinerary: FormattedItinerary | null }
+  | { id: string; role: 'ai'; kind: 'links'; time: string; body: string; links: FreeTierLinks };
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -86,6 +87,48 @@ function formatDate(isoUtc: string) {
   } catch {
     return isoUtc;
   }
+}
+
+function LinksBlock({
+  time,
+  body,
+  links,
+}: {
+  time: string;
+  body: string;
+  links: FreeTierLinks;
+}) {
+  return (
+    <div className="flex max-w-[90%] gap-4">
+      <AiAvatar />
+      <div className="flex-1 space-y-4">
+        <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 leading-relaxed text-landing-on-surface">
+          {body}
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <a
+            href={links.transportUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-xl bg-landing-primary px-5 py-3 text-sm font-bold text-white shadow-md transition-transform hover:opacity-90 active:scale-95"
+          >
+            <Plane className="size-4 shrink-0" strokeWidth={2} />
+            Search Transport
+          </a>
+          <a
+            href={links.accommodationUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-landing-primary px-5 py-3 text-sm font-bold text-landing-primary transition-transform hover:bg-landing-primary/5 active:scale-95"
+          >
+            <Hotel className="size-4 shrink-0" strokeWidth={2} />
+            Search Accommodation
+          </a>
+        </div>
+        <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">{time}</span>
+      </div>
+    </div>
+  );
 }
 
 function RichCardsBlock({
@@ -299,6 +342,20 @@ export function PlanningChat() {
     ]);
   }, []);
 
+  const pushAiLinks = useCallback((body: string, links: FreeTierLinks) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        role: 'ai',
+        kind: 'links',
+        body,
+        time: formatMessageTime(new Date()),
+        links,
+      },
+    ]);
+  }, []);
+
   const handleSendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -341,7 +398,11 @@ export function PlanningChat() {
               if (event.type === 'status') {
                 setLoadingMessage(event.message);
               } else if (event.type === 'done') {
-                pushAiText(event.reply);
+                if (event.links) {
+                  pushAiLinks(event.reply, event.links);
+                } else {
+                  pushAiText(event.reply);
+                }
                 if (event.itinerary) {
                   pushAiCards(event.itinerary);
                   setCurrentItinerary(event.itinerary);
@@ -361,7 +422,7 @@ export function PlanningChat() {
         setLoadingMessage('FanBuddy is planning your trip...');
       }
     },
-    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards],
+    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks],
   );
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -517,6 +578,16 @@ export function PlanningChat() {
                           </span>
                         </div>
                       </div>
+                    );
+                  }
+                  if (m.role === 'ai' && m.kind === 'links') {
+                    return (
+                      <LinksBlock
+                        key={m.id}
+                        time={m.time}
+                        body={m.body}
+                        links={m.links}
+                      />
                     );
                   }
                   if (!m.itinerary) return null;
