@@ -931,6 +931,25 @@ function afterDirectReply(
   return state.direct_reply ? END : nextNode;
 }
 
+export function routeFromRouter(
+  state: Pick<State, 'trip_complete' | 'conversation_stage'>,
+): string | typeof END {
+  if (state.trip_complete) return END;
+  switch (state.conversation_stage) {
+    case 'collecting_team':
+    case 'selecting_match':
+      return 'list_matches_node';
+    case 'collecting_preferences':
+      return 'collect_preferences_node';
+    case 'confirming_dates':
+      return 'confirm_dates_node';
+    case 'trip_complete':
+      return END;
+    default:
+      return 'list_matches_node';
+  }
+}
+
 // ─── Graph Assembly ───────────────────────────────────────────────────────────
 
 const checkpointer = new MemorySaver();
@@ -943,7 +962,16 @@ const graph = new StateGraph(GraphState)
   .addNode('generate_links_node', generate_links_node)
   .addNode('activities_node', activities_node)
   .addEdge(START, 'router_node')
-  .addEdge('router_node', 'list_matches_node')
+  .addConditionalEdges(
+    'router_node',
+    routeFromRouter,
+    {
+      list_matches_node: 'list_matches_node',
+      collect_preferences_node: 'collect_preferences_node',
+      confirm_dates_node: 'confirm_dates_node',
+      [END]: END,
+    },
+  )
   .addConditionalEdges(
     'list_matches_node',
     (state) => afterDirectReply(state, 'collect_preferences_node'),
