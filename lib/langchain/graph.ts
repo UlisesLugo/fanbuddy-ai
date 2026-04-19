@@ -43,10 +43,17 @@ import type { ActivitiesData } from './types';
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
-const model = new ChatAnthropic({
-  model: 'claude-sonnet-4-20250514',
-  temperature: 0,
-});
+let model: ChatAnthropic | null = null;
+
+function getModel(): ChatAnthropic {
+  if (!model) {
+    model = new ChatAnthropic({
+      model: 'claude-sonnet-4-20250514',
+      temperature: 0,
+    });
+  }
+  return model;
+}
 
 // ─── Graph State ──────────────────────────────────────────────────────────────
 
@@ -174,7 +181,7 @@ const RouterSchema = z.object({
 
 async function router_node(state: State): Promise<Partial<State>> {
   const lastMessage = state.messages[state.messages.length - 1];
-  const structured = model.withStructuredOutput(RouterSchema);
+  const structured = getModel().withStructuredOutput(RouterSchema);
 
   // Include the last AI message so the extractor can resolve ambiguous replies
   // (e.g. "Barcelona" after "What city are you travelling from?" → origin_city, not team).
@@ -447,7 +454,7 @@ async function activities_node(state: State): Promise<Partial<State>> {
   }
 
   try {
-    const structured = model.withStructuredOutput(ActivitiesDataSchema);
+    const structured = getModel().withStructuredOutput(ActivitiesDataSchema);
     const prompt = buildActivitiesPrompt(match, travelDates);
     const result: ActivitiesData = await structured.invoke(prompt);
     return { activities: result };
@@ -873,7 +880,7 @@ async function formatter_node(state: State): Promise<Partial<State>> {
   const wasDowngraded = itinerary.hotel.wasDowngraded;
 
   // Single LLM call — only for the natural-language summary
-  const summaryResponse = await model.invoke(
+  const summaryResponse = await getModel().invoke(
     `You are FanBuddy.AI. Write a friendly, enthusiastic 1-2 sentence summary for this football trip.
 Match: ${itinerary.match.homeTeam} vs ${itinerary.match.awayTeam} at ${itinerary.match.venue} on ${new Date(itinerary.match.kickoffUtc).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.
 Flight: ${itinerary.flight.outbound.airline}, €${flightsEur}. Hotel: ${itinerary.hotel.name} (${itinerary.hotel.nights} nights, €${stayEur}). Tickets: €${matchTicketEur}. Total: €${totalEur}.${validationStatus === 'PROVISIONAL' ? ' Note: TV schedule is unconfirmed, so the matchday is provisional.' : ''}`,
@@ -962,6 +969,13 @@ const graph = new StateGraph(GraphState)
   .addEdge('generate_links_node', 'activities_node')
   .addEdge('activities_node', END)
   .compile({ checkpointer });
+
+// ─── Conditional edge function (to be implemented in Task 4) ────────────────
+
+// Placeholder: will be properly implemented in Task 4
+export function routeFromRouter(state: any): string | typeof END {
+  throw new Error('routeFromRouter not yet implemented');
+}
 
 export { graph };
 export type { State as GraphStateType };
