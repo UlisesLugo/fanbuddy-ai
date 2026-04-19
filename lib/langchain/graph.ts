@@ -469,6 +469,8 @@ async function generate_links_node(state: State): Promise<Partial<State>> {
     free_tier_links: links,
     direct_reply: reply,
     messages: [new AIMessage(reply)],
+    trip_complete: true,
+    conversation_stage: 'trip_complete' as ConversationStage,
   };
 }
 
