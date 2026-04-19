@@ -20,6 +20,7 @@ import { searchRoundTrip, type FlightOption } from '../flights';
 import { searchHotels, type HotelOption } from '../hotels';
 
 import type {
+  ConversationStage,
   FixtureSummary,
   FormattedItinerary,
   FreeTierLinks,
@@ -115,6 +116,14 @@ const GraphState = Annotation.Root({
   activities: Annotation<ActivitiesData | null>({
     reducer: (_, y) => y,
     default: () => null,
+  }),
+  conversation_stage: Annotation<ConversationStage>({
+    reducer: (_, y) => y,
+    default: () => 'collecting_team' as ConversationStage,
+  }),
+  trip_complete: Annotation<boolean>({
+    reducer: (_, y) => y,
+    default: () => false,
   }),
 });
 
@@ -280,11 +289,14 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
     originCity ? geocodeVenue(originCity) : Promise.resolve(null),
   ]);
 
-  // Same-city guardrail — only fires when we have an origin city to compare
+  // Same-city guardrail — only fires when we have an origin city to compare.
+  // Explicitly exclude 'UNKNOWN': two unresolved cities must not be treated as equal.
   if (
     originCity &&
     venueGeo?.nearestAirportCode &&
+    venueGeo.nearestAirportCode !== 'UNKNOWN' &&
     originGeo?.nearestAirportCode &&
+    originGeo.nearestAirportCode !== 'UNKNOWN' &&
     venueGeo.nearestAirportCode === originGeo.nearestAirportCode
   ) {
     const reply =
@@ -511,9 +523,12 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
 
     // Guardrail: if the match venue is in the user's home city, trip planning
     // makes no sense. Compare nearest airport codes — same IATA code = same city.
+    // Exclude 'UNKNOWN': two unresolved cities must not be treated as equal.
     if (
       geo?.nearestAirportCode &&
+      geo.nearestAirportCode !== 'UNKNOWN' &&
       originGeo?.nearestAirportCode &&
+      originGeo.nearestAirportCode !== 'UNKNOWN' &&
       geo.nearestAirportCode === originGeo.nearestAirportCode
     ) {
       const reply =
