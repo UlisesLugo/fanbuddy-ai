@@ -274,13 +274,27 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
   const dateFrom = minPlanDate.toISOString().slice(0, 10);
   const dateTo = ninetyDaysOut.toISOString().slice(0, 10);
 
-  let fixtures;
-  try {
-    fixtures = await searchFixtures(teamId, dateFrom, dateTo);
-  } catch (err) {
-    console.error('[list_matches_node] football-data.org call failed:', err);
-    const reply = 'I had trouble fetching fixtures right now. Please try again in a moment.';
-    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  let fixtures: Array<{ id: number; homeTeam: { name: string }; awayTeam: { name: string }; utcDate: string; competition: { name: string }; venue: string | null; status: string }>;
+
+  if (state.fixture_list?.length) {
+    // Use cached fixture list — skip searchFixtures API call
+    fixtures = state.fixture_list.map((s, i) => ({
+      id: i + 1,
+      homeTeam: { name: s.homeTeam },
+      awayTeam: { name: s.awayTeam },
+      utcDate: s.kickoffUtc,
+      competition: { name: s.competition },
+      venue: s.venue,
+      status: 'TIMED',
+    }));
+  } else {
+    try {
+      fixtures = await searchFixtures(teamId, dateFrom, dateTo);
+    } catch (err) {
+      console.error('[list_matches_node] football-data.org call failed:', err);
+      const reply = 'I had trouble fetching fixtures right now. Please try again in a moment.';
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
   }
 
   const upcoming = fixtures.slice(0, 5);
