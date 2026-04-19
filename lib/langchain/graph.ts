@@ -170,6 +170,22 @@ const RouterSchema = z.object({
     .describe(
       'True if the user asks the agent to recommend dates or says "you decide" / "give me a recommendation". False otherwise.',
     ),
+  conversation_stage: z
+    .enum([
+      'collecting_team',
+      'selecting_match',
+      'collecting_preferences',
+      'confirming_dates',
+      'trip_complete',
+    ])
+    .describe(
+      'Stage of the trip-planning conversation based on what is already known. ' +
+      'Use collecting_team if favorite_team is unknown. ' +
+      'Use selecting_match if team is known and fixtures are loaded but no match is selected. ' +
+      'Use collecting_preferences if match is selected but origin_city or spending_tier is missing. ' +
+      'Use confirming_dates if match and preferences are known but travel_dates is missing. ' +
+      'Use trip_complete if trip_complete context value is true.',
+    ),
 });
 
 async function router_node(state: State): Promise<Partial<State>> {
@@ -184,9 +200,21 @@ async function router_node(state: State): Promise<Partial<State>> {
     ? `\nConversation context — the assistant just asked: "${lastAiMessage.content}"\n`
     : '';
 
+  const stateContext = `
+Current session state (use this to classify conversation_stage):
+- favorite_team: ${state.user_preferences.favorite_team || 'UNKNOWN'}
+- fixture_list loaded: ${state.fixture_list?.length ? `yes (${state.fixture_list.length} fixtures)` : 'no'}
+- selected_match_id: ${state.user_preferences.selected_match_id ?? 'UNKNOWN'}
+- origin_city: ${state.user_preferences.origin_city || 'UNKNOWN'}
+- spending_tier: ${state.user_preferences.spending_tier ?? 'UNKNOWN'}
+- travel_dates: ${state.user_preferences.travel_dates ? `${state.user_preferences.travel_dates.checkIn} to ${state.user_preferences.travel_dates.checkOut}` : 'UNKNOWN'}
+- trip_complete: ${state.trip_complete}
+`;
+
   const result = await structured.invoke(
     `You are an information extractor for FanBuddy.AI, a football trip planning app.
 ${contextLine}
+${stateContext}
 Extract the following from the user's message if present:
 - origin_city: the city the user is travelling FROM. Null if not mentioned. Use the conversation context to resolve ambiguity — if the assistant just asked for the origin city and the user replied with a place name (even one that shares a name with a football club), treat it as origin_city.
 - favorite_team: the football club the user wants to watch. Null if not mentioned. Only extract this if the user is clearly referring to a team, not answering a question about where they live or travel from.
@@ -194,6 +222,7 @@ Extract the following from the user's message if present:
 - spending_tier: "luxury", "value", or "budget" if the user expresses a spending preference. Null if not mentioned.
 - travel_dates: { checkIn, checkOut } in YYYY-MM-DD format if the user provides specific travel dates. Null if not mentioned.
 - wants_date_recommendation: true ONLY if the user explicitly asks you to recommend dates or says "you decide". false otherwise.
+- conversation_stage: classify using the session state provided above.
 
 User message: "${lastMessage.content}"`,
   );
