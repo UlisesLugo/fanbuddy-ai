@@ -80,6 +80,13 @@ export interface CostBreakdown {
 
 export type ValidationStatus = 'OK' | 'PROVISIONAL' | 'FAILED';
 
+export type ConversationStage =
+  | 'collecting_team'
+  | 'selecting_match'
+  | 'collecting_preferences'
+  | 'confirming_dates'
+  | 'trip_complete';
+
 export interface FormattedItinerary {
   match: MatchCard;
   flight: FlightCard;
