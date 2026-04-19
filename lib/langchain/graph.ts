@@ -437,8 +437,8 @@ async function activities_node(state: State): Promise<Partial<State>> {
   try {
     const structured = model.withStructuredOutput(ActivitiesDataSchema);
     const prompt = buildActivitiesPrompt(match, travelDates);
-    const result = await structured.invoke(prompt);
-    return { activities: result as ActivitiesData };
+    const result: ActivitiesData = await structured.invoke(prompt);
+    return { activities: result };
   } catch (err) {
     console.error('[activities_node] LLM call failed:', err);
     return { activities: null };
@@ -944,7 +944,11 @@ const graph = new StateGraph(GraphState)
     (state) => afterDirectReply(state, 'generate_links_node'),
     { generate_links_node: 'generate_links_node', [END]: END },
   )
-  .addEdge('generate_links_node', 'activities_node')
+  .addConditionalEdges(
+    'generate_links_node',
+    (state) => afterDirectReply(state, 'activities_node'),
+    { activities_node: 'activities_node', [END]: END },
+  )
   .addEdge('activities_node', END)
   .compile({ checkpointer });
 
