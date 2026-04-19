@@ -388,6 +388,13 @@ const DAY_DOT_COLOR: Record<string, string> = {
   departure: 'bg-indigo-500',
 };
 
+const CATEGORY_BADGE_COLOR: Record<string, string> = {
+  football: 'text-emerald-600',
+  culture: 'text-violet-600',
+  food: 'text-orange-500',
+  sightseeing: 'text-sky-600',
+};
+
 function sumDurationMinutes(durations: string[]): number {
   return durations.reduce((sum, d) => {
     const m = d.match(/(\d+(?:\.\d+)?)\s*(hour|hr|minute|min)/i);
@@ -403,7 +410,11 @@ function formatTotalHours(minutes: number): string {
 }
 
 function ActivitiesAccordion({ activities }: { activities: ActivitiesData }) {
-  const [openDay, setOpenDay] = useState<string>(activities.days[0]?.day ?? '');
+  const defaultOpen =
+    activities.days.find((d) => d.day === 'arrival')?.day ??
+    activities.days[0]?.day ??
+    '';
+  const [openDay, setOpenDay] = useState<string>(defaultOpen);
 
   return (
     <div className="mt-6">
@@ -455,7 +466,7 @@ function ActivitiesAccordion({ activities }: { activities: ActivitiesData }) {
                             {a.tip}
                           </p>
                         )}
-                        <span className="mt-1 inline-block text-[9px] font-semibold text-emerald-600">
+                        <span className={`mt-1 inline-block text-[9px] font-semibold ${CATEGORY_BADGE_COLOR[a.category] ?? 'text-emerald-600'}`}>
                           {a.estimatedDuration}
                         </span>
                       </div>

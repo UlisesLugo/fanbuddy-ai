@@ -944,11 +944,7 @@ const graph = new StateGraph(GraphState)
     (state) => afterDirectReply(state, 'generate_links_node'),
     { generate_links_node: 'generate_links_node', [END]: END },
   )
-  .addConditionalEdges(
-    'generate_links_node',
-    (state) => afterDirectReply(state, 'activities_node'),
-    { activities_node: 'activities_node', [END]: END },
-  )
+  .addEdge('generate_links_node', 'activities_node')
   .addEdge('activities_node', END)
   .compile({ checkpointer });
 
