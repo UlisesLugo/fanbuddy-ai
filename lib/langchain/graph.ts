@@ -37,6 +37,9 @@ import {
   recommendTravelDates,
 } from './free-tier';
 
+import { ActivitiesDataSchema, buildActivitiesPrompt } from './activities';
+import type { ActivitiesData } from './types';
+
 // ─── Model ────────────────────────────────────────────────────────────────────
 
 const model = new ChatAnthropic({
@@ -106,6 +109,10 @@ const GraphState = Annotation.Root({
     default: () => 0,
   }),
   fixture_list: Annotation<FixtureSummary[] | null>({
+    reducer: (_, y) => y,
+    default: () => null,
+  }),
+  activities: Annotation<ActivitiesData | null>({
     reducer: (_, y) => y,
     default: () => null,
   }),
@@ -413,6 +420,29 @@ async function generate_links_node(state: State): Promise<Partial<State>> {
     direct_reply: reply,
     messages: [new AIMessage(reply)],
   };
+}
+
+// ─── Node: activities_node ────────────────────────────────────────────────────
+// Generates day-by-day activity recommendations via one structured LLM call.
+// Non-blocking: returns activities: null on any error or missing prerequisite.
+
+async function activities_node(state: State): Promise<Partial<State>> {
+  const match = state.itinerary?.match;
+  const travelDates = state.user_preferences.travel_dates;
+
+  if (!match || !travelDates) {
+    return { activities: null };
+  }
+
+  try {
+    const structured = model.withStructuredOutput(ActivitiesDataSchema);
+    const prompt = buildActivitiesPrompt(match, travelDates);
+    const result = await structured.invoke(prompt);
+    return { activities: result as ActivitiesData };
+  } catch (err) {
+    console.error('[activities_node] LLM call failed:', err);
+    return { activities: null };
+  }
 }
 
 // ─── Paid-tier nodes (not wired — reserved for future paid-tier flow) ─────────
@@ -896,6 +926,7 @@ const graph = new StateGraph(GraphState)
   .addNode('collect_preferences_node', collect_preferences_node)
   .addNode('confirm_dates_node', confirm_dates_node)
   .addNode('generate_links_node', generate_links_node)
+  .addNode('activities_node', activities_node)
   .addEdge(START, 'router_node')
   .addEdge('router_node', 'list_matches_node')
   .addConditionalEdges(
@@ -913,7 +944,8 @@ const graph = new StateGraph(GraphState)
     (state) => afterDirectReply(state, 'generate_links_node'),
     { generate_links_node: 'generate_links_node', [END]: END },
   )
-  .addEdge('generate_links_node', END)
+  .addEdge('generate_links_node', 'activities_node')
+  .addEdge('activities_node', END)
   .compile({ checkpointer });
 
 export { graph };
