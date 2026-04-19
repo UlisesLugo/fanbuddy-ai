@@ -439,7 +439,7 @@ function ActivitiesAccordion({ activities }: { activities: ActivitiesData }) {
                 <div className="border-t border-landing-outline-variant/10 bg-landing-container-lowest px-3 py-2">
                   {d.activities.map((a, i) => (
                     <div
-                      key={i}
+                      key={a.name}
                       className={`flex gap-2 py-2 ${i < d.activities.length - 1 ? 'border-b border-landing-outline-variant/10' : ''}`}
                     >
                       <span className="shrink-0 text-sm">
@@ -913,7 +913,7 @@ export function PlanningChat() {
                   </p>
                 </div>
               ) : (
-  <div className="no-scrollbar flex flex-1 flex-col overflow-y-auto">
+                <div className="no-scrollbar flex flex-1 flex-col overflow-y-auto">
                   <div className="relative space-y-10">
                     <div className="absolute bottom-2 left-[11px] top-2 w-0.5 bg-landing-outline-variant/20" />
                     <div className="relative flex gap-4">
@@ -1011,7 +1011,7 @@ export function PlanningChat() {
                   {currentActivities && (
                     <ActivitiesAccordion activities={currentActivities} />
                   )}
-    </div>
+                </div>
               )}
             </aside>
           </div>
