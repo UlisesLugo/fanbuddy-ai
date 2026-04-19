@@ -243,7 +243,7 @@ User message: "${lastMessage.content}"`,
     },
     wants_date_recommendation: result.wants_date_recommendation,
     conversation_stage: stage,
-    trip_complete: isComplete,
+    trip_complete: isComplete || state.trip_complete,
     ...(isComplete ? { direct_reply: TRIP_COMPLETE_MSG, messages: [new AIMessage(TRIP_COMPLETE_MSG)] } : {}),
   };
 }
@@ -285,7 +285,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       utcDate: s.kickoffUtc,
       competition: { name: s.competition },
       venue: s.venue,
-      status: 'TIMED',
+      status: s.status,
     }));
   } else {
     try {
@@ -312,6 +312,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       kickoffUtc: f.utcDate,
       competition: f.competition.name,
       venue: f.venue,
+      status: f.status,
     }));
     const reply = formatFixtureList(summaries);
     return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
@@ -326,6 +327,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       kickoffUtc: f.utcDate,
       competition: f.competition.name,
       venue: f.venue,
+      status: f.status,
     }));
     const reply =
       `I didn't catch which match you meant. Here are the options again:\n\n` +

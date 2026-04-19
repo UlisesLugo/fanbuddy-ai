@@ -9,6 +9,7 @@ export interface FixtureSummary {
   kickoffUtc: string;
   competition: string;
   venue: string | null;
+  status: string;
 }
 
 // ── User preferences (persisted via checkpointer) ────────────────────────────

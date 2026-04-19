@@ -37,7 +37,7 @@ describe('routeFromRouter', () => {
     ).toBe('confirm_dates_node');
   });
 
-  it('falls back to list_matches_node for unknown stage', () => {
+  it('routes trip_complete stage to END', () => {
     expect(
       routeFromRouter({ ...baseState, conversation_stage: 'trip_complete' as 'collecting_team' }),
     ).toBe(END);
