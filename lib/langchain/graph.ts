@@ -48,6 +48,9 @@ const model = new ChatAnthropic({
   temperature: 0,
 });
 
+const TRIP_COMPLETE_MSG =
+  'Your trip is already planned! Refresh the page to start planning a new one.';
+
 // ─── Graph State ──────────────────────────────────────────────────────────────
 
 const GraphState = Annotation.Root({
@@ -227,6 +230,9 @@ Extract the following from the user's message if present:
 User message: "${lastMessage.content}"`,
   );
 
+  const stage = result.conversation_stage;
+  const isComplete = stage === 'trip_complete';
+
   return {
     user_preferences: {
       origin_city: result.origin_city ?? state.user_preferences.origin_city,
@@ -236,6 +242,9 @@ User message: "${lastMessage.content}"`,
       spending_tier: result.spending_tier ?? state.user_preferences.spending_tier ?? null,
     },
     wants_date_recommendation: result.wants_date_recommendation,
+    conversation_stage: stage,
+    trip_complete: isComplete,
+    ...(isComplete ? { direct_reply: TRIP_COMPLETE_MSG, messages: [new AIMessage(TRIP_COMPLETE_MSG)] } : {}),
   };
 }
 
