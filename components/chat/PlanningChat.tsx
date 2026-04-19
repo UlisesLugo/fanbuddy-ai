@@ -12,6 +12,7 @@ import {
   Hotel,
   Landmark,
   LayoutGrid,
+  MapPin,
   Plane,
   PlaneTakeoff,
   Plus,
@@ -33,7 +34,7 @@ import {
   useState,
 } from 'react';
 
-import type { ChatStreamEvent, FixtureSummary, FormattedItinerary, FreeTierLinks } from '@/lib/langchain/types';
+import type { ActivitiesData, ChatStreamEvent, FixtureSummary, FormattedItinerary, FreeTierLinks } from '@/lib/langchain/types';
 
 const USER_AVATAR =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAY1f4voJura_4QT6uFG36VKeOxxEFTPgk9SIJG5SLiLz4mSlL3s__8iX1WLU-t-FzIC52OJtcokCWu1eIjvveVmXeImFiAKczjvtnIEHu14jY6kwwxDtHGTG19s4Jp9WLYwJ-pLN6oo5xKzyRWnV7-XHzF8EfYEES-dQ3-w1bTZUjfoy7-Hko3uGnK_8Z8du14k-ePf6VnsvtSDVdcTWU1eQJU1fb0VPFK7spKvqO7rWoyRzJeMVAsAlLgspk9UerYkBrJLI4x-Fg';
@@ -374,6 +375,102 @@ function RichCardsBlock({
   );
 }
 
+const CATEGORY_EMOJI: Record<string, string> = {
+  football: '⚽',
+  culture: '🏛️',
+  food: '🍽️',
+  sightseeing: '🗺️',
+};
+
+const DAY_DOT_COLOR: Record<string, string> = {
+  arrival: 'bg-emerald-500',
+  match: 'bg-amber-400',
+  departure: 'bg-indigo-500',
+};
+
+function sumDurationMinutes(durations: string[]): number {
+  return durations.reduce((sum, d) => {
+    const m = d.match(/(\d+(?:\.\d+)?)\s*(hour|hr|minute|min)/i);
+    if (!m) return sum;
+    const val = parseFloat(m[1]);
+    return sum + (m[2].toLowerCase().startsWith('h') ? val * 60 : val);
+  }, 0);
+}
+
+function formatTotalHours(minutes: number): string {
+  const h = minutes / 60;
+  return h < 1 ? `${Math.round(minutes)}m` : `~${h % 1 === 0 ? h : h.toFixed(1)}h`;
+}
+
+function ActivitiesAccordion({ activities }: { activities: ActivitiesData }) {
+  const [openDay, setOpenDay] = useState<string>(activities.days[0]?.day ?? '');
+
+  return (
+    <div className="mt-6">
+      <div className="mb-3 flex items-center gap-2">
+        <MapPin className="size-4 text-landing-primary" strokeWidth={2} />
+        <h4 className="text-xs font-bold uppercase tracking-wider text-landing-on-surface-variant">
+          Activities
+        </h4>
+      </div>
+      <div className="flex flex-col gap-2">
+        {activities.days.map((d) => {
+          const isOpen = openDay === d.day;
+          const totalMins = sumDurationMinutes(d.activities.map((a) => a.estimatedDuration));
+          return (
+            <div
+              key={d.day}
+              className="overflow-hidden rounded-xl border border-landing-outline-variant/15"
+            >
+              <button
+                type="button"
+                onClick={() => setOpenDay(isOpen ? '' : d.day)}
+                className="flex w-full items-center justify-between bg-white px-3 py-2.5 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <div className={`h-1.5 w-1.5 rounded-full ${DAY_DOT_COLOR[d.day] ?? 'bg-zinc-400'}`} />
+                  <span className="text-[11px] font-bold text-landing-on-surface">{d.label}</span>
+                </div>
+                <span className="text-[10px] text-landing-on-surface-variant">
+                  {d.activities.length} items · {formatTotalHours(totalMins)}
+                </span>
+              </button>
+              {isOpen && (
+                <div className="border-t border-landing-outline-variant/10 bg-landing-container-lowest px-3 py-2">
+                  {d.activities.map((a, i) => (
+                    <div
+                      key={i}
+                      className={`flex gap-2 py-2 ${i < d.activities.length - 1 ? 'border-b border-landing-outline-variant/10' : ''}`}
+                    >
+                      <span className="shrink-0 text-sm">
+                        {CATEGORY_EMOJI[a.category] ?? '📍'}
+                      </span>
+                      <div>
+                        <p className="text-[11px] font-semibold text-landing-on-surface">{a.name}</p>
+                        <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
+                          {a.description}
+                        </p>
+                        {a.tip && (
+                          <p className="mt-0.5 text-[10px] italic text-landing-on-surface-variant/70">
+                            {a.tip}
+                          </p>
+                        )}
+                        <span className="mt-1 inline-block text-[9px] font-semibold text-emerald-600">
+                          {a.estimatedDuration}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const QUICK_CHIPS: { label: string; text: string; icon: typeof Plane }[] = [
   { label: 'Find Flights', text: 'Find flights for my trip.', icon: Plane },
   {
@@ -399,6 +496,7 @@ export function PlanningChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('FanBuddy is planning your trip...');
   const [currentItinerary, setCurrentItinerary] = useState<FormattedItinerary | null>(null);
+  const [currentActivities, setCurrentActivities] = useState<ActivitiesData | null>(null);
   // Stable thread_id for this session — enables conversation memory across messages
   const [threadId] = useState(() => crypto.randomUUID());
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -532,6 +630,9 @@ export function PlanningChat() {
                 if (event.itinerary) {
                   pushAiCards(event.itinerary);
                   setCurrentItinerary(event.itinerary);
+                }
+                if (event.activities) {
+                  setCurrentActivities(event.activities);
                 }
               } else if (event.type === 'error') {
                 pushAiText(event.message);
@@ -812,7 +913,7 @@ export function PlanningChat() {
                   </p>
                 </div>
               ) : (
-                <>
+  <div className="no-scrollbar flex flex-1 flex-col overflow-y-auto">
                   <div className="relative space-y-10">
                     <div className="absolute bottom-2 left-[11px] top-2 w-0.5 bg-landing-outline-variant/20" />
                     <div className="relative flex gap-4">
@@ -871,7 +972,7 @@ export function PlanningChat() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-auto rounded-2xl border border-landing-outline-variant/5 bg-white p-6 shadow-sm">
+                  <div className="mt-6 rounded-2xl border border-landing-outline-variant/5 bg-white p-6 shadow-sm">
                     <div className="mb-4 flex items-center justify-between">
                       <h4 className="text-xs font-bold text-landing-on-surface-variant">
                         ESTIMATED COST
@@ -907,7 +1008,10 @@ export function PlanningChat() {
                       </div>
                     </div>
                   </div>
-                </>
+                  {currentActivities && (
+                    <ActivitiesAccordion activities={currentActivities} />
+                  )}
+    </div>
               )}
             </aside>
           </div>
