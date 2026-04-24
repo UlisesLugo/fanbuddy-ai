@@ -3,10 +3,11 @@ import { AIMessage, BaseMessage } from '@langchain/core/messages';
 import {
   Annotation,
   END,
-  MemorySaver,
   START,
   StateGraph,
 } from '@langchain/langgraph';
+
+import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { z } from 'zod';
 
 import {
@@ -28,6 +29,7 @@ import type {
   RawFlightOption,
   RawHotelOption,
   RawMatchFixture,
+  UserPlan,
   UserPreferences,
 } from './types';
 
@@ -127,6 +129,10 @@ const GraphState = Annotation.Root({
   trip_complete: Annotation<boolean>({
     reducer: (_, y) => y,
     default: () => false,
+  }),
+  user_plan: Annotation<UserPlan>({
+    reducer: (_, y) => y,
+    default: () => 'free' as UserPlan,
   }),
 });
 
@@ -1010,17 +1016,46 @@ export function routeFromRouter(
   }
 }
 
+export function routeAfterDates(
+  state: Pick<State, 'direct_reply' | 'user_plan'>,
+): string | typeof END {
+  if (state.direct_reply) return END;
+  return state.user_plan === 'paid' ? 'plan_travel_node' : 'generate_links_node';
+}
+
+export function shouldRetryOrFinish(
+  state: Pick<State, 'validation_errors' | 'attempt_count'>,
+): string {
+  const hardErrors = state.validation_errors.filter((e) => !e.includes('PROVISIONAL'));
+  if (hardErrors.length > 0 && state.attempt_count < 3) {
+    return 'plan_travel_node';
+  }
+  return 'formatter_node';
+}
+
 // ─── Graph Assembly ───────────────────────────────────────────────────────────
 
-const checkpointer = new MemorySaver();
+const checkpointer = PostgresSaver.fromConnString(process.env.DATABASE_URL!);
+let _compiledGraph: Awaited<ReturnType<typeof _graph.compile>> | null = null;
 
-const graph = new StateGraph(GraphState)
+export async function buildGraph() {
+  if (!_compiledGraph) {
+    await checkpointer.setup(); // idempotent — CREATE TABLE IF NOT EXISTS
+    _compiledGraph = _graph.compile({ checkpointer });
+  }
+  return _compiledGraph;
+}
+
+const _graph = new StateGraph(GraphState)
   .addNode('router_node', router_node)
   .addNode('list_matches_node', list_matches_node)
   .addNode('collect_preferences_node', collect_preferences_node)
   .addNode('confirm_dates_node', confirm_dates_node)
   .addNode('generate_links_node', generate_links_node)
   .addNode('activities_node', activities_node)
+  .addNode('plan_travel_node', plan_travel_node)
+  .addNode('validator_node', validator_node)
+  .addNode('formatter_node', formatter_node)
   .addEdge(START, 'router_node')
   .addConditionalEdges(
     'router_node',
@@ -1044,12 +1079,24 @@ const graph = new StateGraph(GraphState)
   )
   .addConditionalEdges(
     'confirm_dates_node',
-    (state) => afterDirectReply(state, 'generate_links_node'),
-    { generate_links_node: 'generate_links_node', [END]: END },
+    routeAfterDates,
+    {
+      generate_links_node: 'generate_links_node',
+      plan_travel_node: 'plan_travel_node',
+      [END]: END,
+    },
   )
   .addEdge('generate_links_node', 'activities_node')
-  .addEdge('activities_node', END)
-  .compile({ checkpointer });
+  .addConditionalEdges(
+    'validator_node',
+    shouldRetryOrFinish,
+    {
+      plan_travel_node: 'plan_travel_node',
+      formatter_node: 'formatter_node',
+    },
+  )
+  .addEdge('plan_travel_node', 'validator_node')
+  .addEdge('formatter_node', 'activities_node')
+  .addEdge('activities_node', END);
 
-export { graph };
 export type { State as GraphStateType };

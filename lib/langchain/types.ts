@@ -88,6 +88,8 @@ export type ConversationStage =
   | 'confirming_dates'
   | 'trip_complete';
 
+export type UserPlan = 'free' | 'paid';
+
 export interface FormattedItinerary {
   match: MatchCard;
   flight: FlightCard;

@@ -1,7 +1,7 @@
 import { HumanMessage } from '@langchain/core/messages';
 import { CallbackHandler } from 'langfuse-langchain';
 
-import { graph } from '@/lib/langchain/graph';
+import { buildGraph } from '@/lib/langchain/graph';
 import type {
   ActivitiesData,
   ChatApiRequest,
@@ -78,6 +78,7 @@ export async function POST(request: Request) {
           wants_date_recommendation: false,
         };
 
+        const graph = await buildGraph();
         const graphStream = await graph.stream(initialState, {
           ...config,
           streamMode: 'updates',
