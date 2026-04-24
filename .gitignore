@@ -40,3 +40,4 @@ next-env.d.ts
 lib/**/*.js
 
 .obsidian
+.superpowers

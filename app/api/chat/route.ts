@@ -3,6 +3,7 @@ import { CallbackHandler } from 'langfuse-langchain';
 
 import { graph } from '@/lib/langchain/graph';
 import type {
+  ActivitiesData,
   ChatApiRequest,
   ChatStreamEvent,
   FixtureSummary,
@@ -21,6 +22,7 @@ const NODE_STATUS: Record<string, string> = {
   collect_preferences_node: 'Got your preferences...',
   confirm_dates_node: 'Confirmed your dates...',
   generate_links_node: 'Building your trip links...',
+  activities_node: 'Planning your activities...',
 };
 
 export async function POST(request: Request) {
@@ -64,10 +66,10 @@ export async function POST(request: Request) {
         // Initial status before the graph starts
         send({ type: 'status', message: 'Analyzing your request...' });
 
-        // Reset planning state each call; messages + user_preferences accumulate via checkpointer
+        // Reset ephemeral state each call; messages, user_preferences, itinerary, and fixture_list
+        // accumulate via checkpointer across turns within the same session.
         const initialState = {
           messages: [new HumanMessage(message)],
-          itinerary: null,
           validation_errors: [],
           attempt_count: 0,
           formatted: null,
@@ -85,6 +87,7 @@ export async function POST(request: Request) {
         let formatted: FormattedItinerary | null = null;
         let links: FreeTierLinks | null = null;
         let fixtures: FixtureSummary[] | null = null;
+        let activities: ActivitiesData | null = null;
 
         for await (const chunk of graphStream) {
           const nodeName = Object.keys(chunk)[0] as string;
@@ -103,6 +106,9 @@ export async function POST(request: Request) {
           if (update.fixture_list != null) {
             fixtures = update.fixture_list as FixtureSummary[];
           }
+          if (update.activities != null) {
+            activities = update.activities as ActivitiesData;
+          }
 
           // Emit status based on which node just finished
           if (NODE_STATUS[nodeName]) {
@@ -115,7 +121,7 @@ export async function POST(request: Request) {
           formatted?.summary ??
           'I was unable to help. Please try again.';
 
-        send({ type: 'done', reply, itinerary: formatted, links, fixtures });
+        send({ type: 'done', reply, itinerary: formatted, links, fixtures, activities });
       } catch (err) {
         console.error('[api/chat] Graph invocation failed:', err);
         send({ type: 'error', message: 'Something went wrong. Please try again.' });

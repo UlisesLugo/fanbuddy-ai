@@ -9,6 +9,7 @@ export interface FixtureSummary {
   kickoffUtc: string;
   competition: string;
   venue: string | null;
+  status: string;
 }
 
 // ── User preferences (persisted via checkpointer) ────────────────────────────
@@ -80,6 +81,13 @@ export interface CostBreakdown {
 
 export type ValidationStatus = 'OK' | 'PROVISIONAL' | 'FAILED';
 
+export type ConversationStage =
+  | 'collecting_team'
+  | 'selecting_match'
+  | 'collecting_preferences'
+  | 'confirming_dates'
+  | 'trip_complete';
+
 export interface FormattedItinerary {
   match: MatchCard;
   flight: FlightCard;
@@ -88,6 +96,27 @@ export interface FormattedItinerary {
   validationStatus: ValidationStatus;
   validationNotes: string[];
   summary: string;
+}
+
+export interface ActivityItem {
+  name: string;
+  category: 'football' | 'culture' | 'food' | 'sightseeing';
+  description: string;
+  estimatedDuration: string;
+  recommendedTime: string;
+  tip?: string;
+}
+
+export interface DayActivities {
+  day: 'arrival' | 'match' | 'departure';
+  date: string;
+  label: string;
+  activities: ActivityItem[];
+}
+
+export interface ActivitiesData {
+  city: string;
+  days: DayActivities[];
 }
 
 // ── Internal graph types (raw tool outputs) ──────────────────────────────────
@@ -140,5 +169,5 @@ export interface ChatApiRequest {
 
 export type ChatStreamEvent =
   | { type: 'status'; message: string }
-  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null; links: FreeTierLinks | null; fixtures: FixtureSummary[] | null }
+  | { type: 'done'; reply: string; itinerary: FormattedItinerary | null; links: FreeTierLinks | null; fixtures: FixtureSummary[] | null; activities: ActivitiesData | null }
   | { type: 'error'; message: string };

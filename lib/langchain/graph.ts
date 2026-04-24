@@ -20,6 +20,7 @@ import { searchRoundTrip, type FlightOption } from '../flights';
 import { searchHotels, type HotelOption } from '../hotels';
 
 import type {
+  ConversationStage,
   FixtureSummary,
   FormattedItinerary,
   FreeTierLinks,
@@ -37,12 +38,18 @@ import {
   recommendTravelDates,
 } from './free-tier';
 
+import { ActivitiesDataSchema, buildActivitiesPrompt } from './activities';
+import type { ActivitiesData } from './types';
+
 // ─── Model ────────────────────────────────────────────────────────────────────
 
 const model = new ChatAnthropic({
   model: 'claude-sonnet-4-20250514',
   temperature: 0,
 });
+
+const TRIP_COMPLETE_MSG =
+  'Your trip is already planned! Refresh the page to start planning a new one.';
 
 // ─── Graph State ──────────────────────────────────────────────────────────────
 
@@ -109,6 +116,18 @@ const GraphState = Annotation.Root({
     reducer: (_, y) => y,
     default: () => null,
   }),
+  activities: Annotation<ActivitiesData | null>({
+    reducer: (_, y) => y,
+    default: () => null,
+  }),
+  conversation_stage: Annotation<ConversationStage>({
+    reducer: (_, y) => y,
+    default: () => 'collecting_team' as ConversationStage,
+  }),
+  trip_complete: Annotation<boolean>({
+    reducer: (_, y) => y,
+    default: () => false,
+  }),
 });
 
 type State = typeof GraphState.State;
@@ -154,6 +173,22 @@ const RouterSchema = z.object({
     .describe(
       'True if the user asks the agent to recommend dates or says "you decide" / "give me a recommendation". False otherwise.',
     ),
+  conversation_stage: z
+    .enum([
+      'collecting_team',
+      'selecting_match',
+      'collecting_preferences',
+      'confirming_dates',
+      'trip_complete',
+    ])
+    .describe(
+      'Stage of the trip-planning conversation based on what is already known. ' +
+      'Use collecting_team if favorite_team is unknown. ' +
+      'Use selecting_match if team is known and fixtures are loaded but no match is selected. ' +
+      'Use collecting_preferences if match is selected but origin_city or spending_tier is missing. ' +
+      'Use confirming_dates if match and preferences are known but travel_dates is missing. ' +
+      'Use trip_complete if trip_complete context value is true.',
+    ),
 });
 
 async function router_node(state: State): Promise<Partial<State>> {
@@ -168,9 +203,21 @@ async function router_node(state: State): Promise<Partial<State>> {
     ? `\nConversation context — the assistant just asked: "${lastAiMessage.content}"\n`
     : '';
 
+  const stateContext = `
+Current session state (use this to classify conversation_stage):
+- favorite_team: ${state.user_preferences.favorite_team || 'UNKNOWN'}
+- fixture_list loaded: ${state.fixture_list?.length ? `yes (${state.fixture_list.length} fixtures)` : 'no'}
+- selected_match_id: ${state.user_preferences.selected_match_id ?? 'UNKNOWN'}
+- origin_city: ${state.user_preferences.origin_city || 'UNKNOWN'}
+- spending_tier: ${state.user_preferences.spending_tier ?? 'UNKNOWN'}
+- travel_dates: ${state.user_preferences.travel_dates ? `${state.user_preferences.travel_dates.checkIn} to ${state.user_preferences.travel_dates.checkOut}` : 'UNKNOWN'}
+- trip_complete: ${state.trip_complete}
+`;
+
   const result = await structured.invoke(
     `You are an information extractor for FanBuddy.AI, a football trip planning app.
 ${contextLine}
+${stateContext}
 Extract the following from the user's message if present:
 - origin_city: the city the user is travelling FROM. Null if not mentioned. Use the conversation context to resolve ambiguity — if the assistant just asked for the origin city and the user replied with a place name (even one that shares a name with a football club), treat it as origin_city.
 - favorite_team: the football club the user wants to watch. Null if not mentioned. Only extract this if the user is clearly referring to a team, not answering a question about where they live or travel from.
@@ -178,9 +225,13 @@ Extract the following from the user's message if present:
 - spending_tier: "luxury", "value", or "budget" if the user expresses a spending preference. Null if not mentioned.
 - travel_dates: { checkIn, checkOut } in YYYY-MM-DD format if the user provides specific travel dates. Null if not mentioned.
 - wants_date_recommendation: true ONLY if the user explicitly asks you to recommend dates or says "you decide". false otherwise.
+- conversation_stage: classify using the session state provided above.
 
 User message: "${lastMessage.content}"`,
   );
+
+  const stage = result.conversation_stage;
+  const isComplete = stage === 'trip_complete';
 
   return {
     user_preferences: {
@@ -191,6 +242,9 @@ User message: "${lastMessage.content}"`,
       spending_tier: result.spending_tier ?? state.user_preferences.spending_tier ?? null,
     },
     wants_date_recommendation: result.wants_date_recommendation,
+    conversation_stage: stage,
+    trip_complete: isComplete || state.trip_complete,
+    ...(isComplete ? { direct_reply: TRIP_COMPLETE_MSG, messages: [new AIMessage(TRIP_COMPLETE_MSG)] } : {}),
   };
 }
 
@@ -220,13 +274,27 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
   const dateFrom = minPlanDate.toISOString().slice(0, 10);
   const dateTo = ninetyDaysOut.toISOString().slice(0, 10);
 
-  let fixtures;
-  try {
-    fixtures = await searchFixtures(teamId, dateFrom, dateTo);
-  } catch (err) {
-    console.error('[list_matches_node] football-data.org call failed:', err);
-    const reply = 'I had trouble fetching fixtures right now. Please try again in a moment.';
-    return { direct_reply: reply, messages: [new AIMessage(reply)] };
+  let fixtures: Array<{ id: number; homeTeam: { name: string }; awayTeam: { name: string }; utcDate: string; competition: { name: string }; venue: string | null; status: string }>;
+
+  if (state.fixture_list?.length) {
+    // Use cached fixture list — skip searchFixtures API call
+    fixtures = state.fixture_list.map((s, i) => ({
+      id: i + 1,
+      homeTeam: { name: s.homeTeam },
+      awayTeam: { name: s.awayTeam },
+      utcDate: s.kickoffUtc,
+      competition: { name: s.competition },
+      venue: s.venue,
+      status: s.status,
+    }));
+  } else {
+    try {
+      fixtures = await searchFixtures(teamId, dateFrom, dateTo);
+    } catch (err) {
+      console.error('[list_matches_node] football-data.org call failed:', err);
+      const reply = 'I had trouble fetching fixtures right now. Please try again in a moment.';
+      return { direct_reply: reply, messages: [new AIMessage(reply)] };
+    }
   }
 
   const upcoming = fixtures.slice(0, 5);
@@ -244,6 +312,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       kickoffUtc: f.utcDate,
       competition: f.competition.name,
       venue: f.venue,
+      status: f.status,
     }));
     const reply = formatFixtureList(summaries);
     return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
@@ -258,6 +327,7 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       kickoffUtc: f.utcDate,
       competition: f.competition.name,
       venue: f.venue,
+      status: f.status,
     }));
     const reply =
       `I didn't catch which match you meant. Here are the options again:\n\n` +
@@ -273,11 +343,14 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
     originCity ? geocodeVenue(originCity) : Promise.resolve(null),
   ]);
 
-  // Same-city guardrail — only fires when we have an origin city to compare
+  // Same-city guardrail — only fires when we have an origin city to compare.
+  // Explicitly exclude 'UNKNOWN': two unresolved cities must not be treated as equal.
   if (
     originCity &&
     venueGeo?.nearestAirportCode &&
+    venueGeo.nearestAirportCode !== 'UNKNOWN' &&
     originGeo?.nearestAirportCode &&
+    originGeo.nearestAirportCode !== 'UNKNOWN' &&
     venueGeo.nearestAirportCode === originGeo.nearestAirportCode
   ) {
     const reply =
@@ -412,7 +485,32 @@ async function generate_links_node(state: State): Promise<Partial<State>> {
     free_tier_links: links,
     direct_reply: reply,
     messages: [new AIMessage(reply)],
+    trip_complete: true,
+    conversation_stage: 'trip_complete' as ConversationStage,
   };
+}
+
+// ─── Node: activities_node ────────────────────────────────────────────────────
+// Generates day-by-day activity recommendations via one structured LLM call.
+// Non-blocking: returns activities: null on any error or missing prerequisite.
+
+async function activities_node(state: State): Promise<Partial<State>> {
+  const match = state.itinerary?.match;
+  const travelDates = state.user_preferences.travel_dates;
+
+  if (!match || !travelDates) {
+    return { activities: null };
+  }
+
+  try {
+    const structured = model.withStructuredOutput(ActivitiesDataSchema);
+    const prompt = buildActivitiesPrompt(match, travelDates);
+    const result: ActivitiesData = await structured.invoke(prompt);
+    return { activities: result };
+  } catch (err) {
+    console.error('[activities_node] LLM call failed:', err);
+    return { activities: null };
+  }
 }
 
 // ─── Paid-tier nodes (not wired — reserved for future paid-tier flow) ─────────
@@ -481,9 +579,12 @@ async function search_matches_node(state: State): Promise<Partial<State>> {
 
     // Guardrail: if the match venue is in the user's home city, trip planning
     // makes no sense. Compare nearest airport codes — same IATA code = same city.
+    // Exclude 'UNKNOWN': two unresolved cities must not be treated as equal.
     if (
       geo?.nearestAirportCode &&
+      geo.nearestAirportCode !== 'UNKNOWN' &&
       originGeo?.nearestAirportCode &&
+      originGeo.nearestAirportCode !== 'UNKNOWN' &&
       geo.nearestAirportCode === originGeo.nearestAirportCode
     ) {
       const reply =
@@ -886,6 +987,29 @@ function afterDirectReply(
   return state.direct_reply ? END : nextNode;
 }
 
+export function routeFromRouter(
+  state: Pick<State, 'trip_complete' | 'conversation_stage' | 'itinerary'>,
+): string | typeof END {
+  if (state.trip_complete) return END;
+  switch (state.conversation_stage) {
+    case 'collecting_team':
+    case 'selecting_match':
+      return 'list_matches_node';
+    case 'collecting_preferences':
+    case 'confirming_dates':
+      // If a match ID was just selected but the fixture hasn't been geocoded yet,
+      // pass through list_matches_node first so it can resolve and set itinerary.match.
+      if (!state.itinerary?.match) return 'list_matches_node';
+      return state.conversation_stage === 'collecting_preferences'
+        ? 'collect_preferences_node'
+        : 'confirm_dates_node';
+    case 'trip_complete':
+      return END;
+    default:
+      return 'list_matches_node';
+  }
+}
+
 // ─── Graph Assembly ───────────────────────────────────────────────────────────
 
 const checkpointer = new MemorySaver();
@@ -896,8 +1020,18 @@ const graph = new StateGraph(GraphState)
   .addNode('collect_preferences_node', collect_preferences_node)
   .addNode('confirm_dates_node', confirm_dates_node)
   .addNode('generate_links_node', generate_links_node)
+  .addNode('activities_node', activities_node)
   .addEdge(START, 'router_node')
-  .addEdge('router_node', 'list_matches_node')
+  .addConditionalEdges(
+    'router_node',
+    routeFromRouter,
+    {
+      list_matches_node: 'list_matches_node',
+      collect_preferences_node: 'collect_preferences_node',
+      confirm_dates_node: 'confirm_dates_node',
+      [END]: END,
+    },
+  )
   .addConditionalEdges(
     'list_matches_node',
     (state) => afterDirectReply(state, 'collect_preferences_node'),
@@ -913,7 +1047,8 @@ const graph = new StateGraph(GraphState)
     (state) => afterDirectReply(state, 'generate_links_node'),
     { generate_links_node: 'generate_links_node', [END]: END },
   )
-  .addEdge('generate_links_node', END)
+  .addEdge('generate_links_node', 'activities_node')
+  .addEdge('activities_node', END)
   .compile({ checkpointer });
 
 export { graph };
