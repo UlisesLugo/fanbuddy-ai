@@ -20,9 +20,9 @@ import {
   Send,
   Settings,
   Shield,
-  UserCircle,
   UtensilsCrossed,
 } from 'lucide-react';
+import { UserButton } from '@clerk/nextjs';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -35,9 +35,6 @@ import {
 } from 'react';
 
 import type { ActivitiesData, ChatStreamEvent, FixtureSummary, FormattedItinerary, FreeTierLinks } from '@/lib/langchain/types';
-
-const USER_AVATAR =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuAY1f4voJura_4QT6uFG36VKeOxxEFTPgk9SIJG5SLiLz4mSlL3s__8iX1WLU-t-FzIC52OJtcokCWu1eIjvveVmXeImFiAKczjvtnIEHu14jY6kwwxDtHGTG19s4Jp9WLYwJ-pLN6oo5xKzyRWnV7-XHzF8EfYEES-dQ3-w1bTZUjfoy7-Hko3uGnK_8Z8du14k-ePf6VnsvtSDVdcTWU1eQJU1fb0VPFK7spKvqO7rWoyRzJeMVAsAlLgspk9UerYkBrJLI4x-Fg';
 
 const MATCH_STADIUM_IMAGE =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDLTSh_KTfytXU6nYhtIQzOZRX8UCYUTpOTyNQ9BHMe7AAJJpxdfVWxIUGhwFKQWBDYp9KOVaOuT_j-MvAGtrdiLLu870p9jMAQupqYRYSe4XlHR9MUl-WwIQ_He4UEbnO-N1168OZrKEB8v_ydMSvLxrF4WXJUWY0-hIc906p8BdIs5GOyXuC0JyRjk9ebdgZEatVvf8cWEbSX-sYtVBXqFrbEahw4pvDZUlTnyoxzXpcmUk7usnaCHHtngIkGkX5qByauvBH8Wbs';
@@ -61,7 +58,8 @@ type ChatMessage =
   | { id: string; role: 'user'; body: string; time: string }
   | { id: string; role: 'ai'; kind: 'cards'; time: string; itinerary: FormattedItinerary | null }
   | { id: string; role: 'ai'; kind: 'links'; time: string; body: string; links: FreeTierLinks }
-  | { id: string; role: 'ai'; kind: 'fixtures'; time: string; body: string; fixtures: FixtureSummary[] };
+  | { id: string; role: 'ai'; kind: 'fixtures'; time: string; body: string; fixtures: FixtureSummary[] }
+  | { id: string; role: 'ai'; kind: 'upgrade'; time: string };
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -594,6 +592,18 @@ export function PlanningChat() {
     ]);
   }, []);
 
+  const pushUpgradePrompt = useCallback(() => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        role: 'ai' as const,
+        kind: 'upgrade' as const,
+        time: formatMessageTime(new Date()),
+      },
+    ]);
+  }, []);
+
   const handleSendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -613,7 +623,23 @@ export function PlanningChat() {
           }),
         });
 
-        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          if (res.status === 403) {
+            const { error } = await res.json() as { error: string };
+            if (error === 'phone_unverified') {
+              pushAiText(
+                'Please verify your phone number in your account settings to start planning trips.',
+              );
+            } else if (error === 'upgrade_required') {
+              pushUpgradePrompt();
+            } else {
+              pushAiText('Access denied. Please try again.');
+            }
+            return;
+          }
+          throw new Error(`HTTP ${res.status}`);
+        }
+        if (!res.body) throw new Error('No response body');
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -665,7 +691,7 @@ export function PlanningChat() {
         setLoadingMessage('FanBuddy is planning your trip...');
       }
     },
-    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks, pushAiFixtures],
+    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks, pushAiFixtures, pushUpgradePrompt],
   );
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -689,13 +715,13 @@ export function PlanningChat() {
           FanBuddy.AI
         </h1>
         <div className="flex gap-4">
-          <button
-            type="button"
-            className="text-landing-on-surface-variant"
-            aria-label="Account"
-          >
-            <UserCircle className="size-6" strokeWidth={2} />
-          </button>
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: 'h-6 w-6 rounded-full',
+              },
+            }}
+          />
           <button
             type="button"
             className="text-landing-on-surface-variant"
@@ -746,7 +772,19 @@ export function PlanningChat() {
               Subscription
             </a>
           </nav>
-          <div className="mt-auto px-4 pb-8">
+          <div className="mt-auto px-4 pb-8 space-y-3">
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch('/api/stripe/checkout', { method: 'POST' });
+                const { url } = await res.json() as { url: string };
+                window.location.href = url;
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-600/30 bg-emerald-50 py-3 font-headline font-bold text-emerald-700 transition-all hover:bg-emerald-100 active:scale-95"
+            >
+              <Crown className="size-4 shrink-0" strokeWidth={2} />
+              Upgrade to Pro
+            </button>
             <button
               type="button"
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-pitch-gradient py-3 font-headline font-bold text-white shadow-lg shadow-emerald-600/20 transition-transform active:scale-95"
@@ -772,12 +810,12 @@ export function PlanningChat() {
                   </p>
                 </div>
                 <div className="flex -space-x-2">
-                  <Image
-                    src={USER_AVATAR}
-                    alt="User avatar"
-                    width={32}
-                    height={32}
-                    className="h-8 w-8 rounded-full border-2 border-white object-cover"
+                  <UserButton
+                    appearance={{
+                      elements: {
+                        avatarBox: 'h-8 w-8 rounded-full border-2 border-white',
+                      },
+                    }}
                   />
                   <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-landing-primary-container">
                     <Bot
@@ -842,6 +880,33 @@ export function PlanningChat() {
                         body={m.body}
                         links={m.links}
                       />
+                    );
+                  }
+                  if (m.role === 'ai' && m.kind === 'upgrade') {
+                    return (
+                      <div key={m.id} className="flex max-w-[90%] gap-4">
+                        <AiAvatar />
+                        <div className="flex-1 space-y-4">
+                          <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-[15px] leading-[1.65] text-landing-on-surface/80">
+                            You&apos;ve used your 3 free trips. Upgrade to{' '}
+                            <strong className="font-semibold text-landing-on-surface">FanBuddy Pro</strong>{' '}
+                            for real flight and hotel options with no limits.
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const res = await fetch('/api/stripe/checkout', { method: 'POST' });
+                              const { url } = await res.json() as { url: string };
+                              window.location.href = url;
+                            }}
+                            className="flex items-center gap-2 rounded-xl bg-pitch-gradient px-5 py-3 text-sm font-bold text-white shadow-md transition-transform hover:opacity-90 active:scale-95"
+                          >
+                            <Crown className="size-4 shrink-0" strokeWidth={2} />
+                            Upgrade to Pro
+                          </button>
+                          <span className="ml-1 text-[10px] text-landing-on-surface-variant/60">{m.time}</span>
+                        </div>
+                      </div>
                     );
                   }
                   if (!m.itinerary) return null;
