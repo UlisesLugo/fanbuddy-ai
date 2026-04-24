@@ -66,10 +66,10 @@ export async function POST(request: Request) {
         // Initial status before the graph starts
         send({ type: 'status', message: 'Analyzing your request...' });
 
-        // Reset planning state each call; messages + user_preferences accumulate via checkpointer
+        // Reset ephemeral state each call; messages, user_preferences, itinerary, and fixture_list
+        // accumulate via checkpointer across turns within the same session.
         const initialState = {
           messages: [new HumanMessage(message)],
-          itinerary: null,
           validation_errors: [],
           attempt_count: 0,
           formatted: null,

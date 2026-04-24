@@ -103,6 +103,7 @@ export interface ActivityItem {
   category: 'football' | 'culture' | 'food' | 'sightseeing';
   description: string;
   estimatedDuration: string;
+  recommendedTime: string;
   tip?: string;
 }
 

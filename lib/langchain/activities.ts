@@ -9,6 +9,7 @@ const ActivityItemSchema = z.object({
   category: z.enum(['football', 'culture', 'food', 'sightseeing']),
   description: z.string(),
   estimatedDuration: z.string(),
+  recommendedTime: z.string().describe('Time of day for this activity, e.g. "09:00–11:00" or "Evening (19:00)"'),
   tip: z.string().optional(),
 });
 
@@ -67,6 +68,13 @@ export function buildActivitiesPrompt(
   const city = match.match_city ?? match.venue;
   const entries = buildDayEntries(match.kickoffUtc, travelDates);
 
+  const kickoffDate = match.kickoffUtc.slice(0, 10);
+  const kickoffTimeUtc = new Date(match.kickoffUtc).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  });
+
   const dayLines = entries
     .map((e) => {
       const d = new Date(e.date + 'T00:00:00Z');
@@ -76,16 +84,16 @@ export function buildActivitiesPrompt(
         month: 'short',
         timeZone: 'UTC',
       });
-      return `- ${e.day} day (${dateStr}): ${e.availableHours} hours available`;
+      const matchNote = e.date === kickoffDate ? ` (match kicks off at ${kickoffTimeUtc} UTC)` : '';
+      return `- ${e.day} day (${dateStr})${matchNote}: ${e.availableHours} hours available outside the match`;
     })
     .join('\n');
 
-  // Build day-specific instructions only for days that are present
   const hasArrival = entries.some((e) => e.day === 'arrival');
   const hasDeparture = entries.some((e) => e.day === 'departure');
 
   const dayInstructions = [
-    'Prioritise football-themed activities on match day (pre-match atmosphere, fan zones, local sports bars near the stadium).',
+    `On match day, ALWAYS include the match itself as the first activity: name "${match.homeTeam} vs ${match.awayTeam}", category "football", kickoff at ${kickoffTimeUtc} UTC. Then add 2-3 pre-match activities (fan zones, sports bars, stadium area) scheduled to finish before kickoff.`,
     hasArrival ? 'On arrival day, favour relaxed, arrival-friendly options.' : '',
     hasDeparture ? 'On departure day, suggest morning activities close to transport links.' : '',
   ]
@@ -104,8 +112,9 @@ Requirements per activity:
 - category: one of football, culture, food, sightseeing
 - description: one sentence
 - estimatedDuration: realistic time (e.g. "2 hours", "45 minutes")
+- recommendedTime: specific time slot for this activity, e.g. "09:00–11:00", "Afternoon (14:00–16:00)", "Evening (20:00)"
 - tip: optional insider tip (short phrase)
 
 ${dayInstructions}
-Ensure the total estimatedDuration for each day fits within its available hours.`;
+Schedule activities in logical time order within each day. Ensure the total estimatedDuration for each day fits within its available hours.`;
 }

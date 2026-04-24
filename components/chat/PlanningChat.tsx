@@ -457,7 +457,12 @@ function ActivitiesAccordion({ activities }: { activities: ActivitiesData }) {
                         {CATEGORY_EMOJI[a.category] ?? '📍'}
                       </span>
                       <div>
-                        <p className="text-[11px] font-semibold text-landing-on-surface">{a.name}</p>
+                        <div className="flex items-baseline gap-2">
+                          <p className="text-[11px] font-semibold text-landing-on-surface">{a.name}</p>
+                          {a.recommendedTime && (
+                            <span className="text-[9px] text-landing-on-surface-variant/80">{a.recommendedTime}</span>
+                          )}
+                        </div>
                         <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
                           {a.description}
                         </p>
@@ -913,7 +918,7 @@ export function PlanningChat() {
                 Live Itinerary
               </h3>
 
-              {!currentItinerary ? (
+              {!currentItinerary && !currentActivities ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-landing-container-highest">
                     <Compass className="size-7 text-landing-on-surface-variant/40" strokeWidth={1.5} />
@@ -925,100 +930,104 @@ export function PlanningChat() {
                 </div>
               ) : (
                 <div className="no-scrollbar flex flex-1 flex-col overflow-y-auto">
-                  <div className="relative space-y-10">
-                    <div className="absolute bottom-2 left-[11px] top-2 w-0.5 bg-landing-outline-variant/20" />
-                    <div className="relative flex gap-4">
-                      <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-landing-primary">
-                        <Plane
-                          className="size-3.5 text-white"
-                          strokeWidth={2}
-                          fill="currentColor"
-                        />
+                  {currentItinerary && (
+                    <>
+                      <div className="relative space-y-10">
+                        <div className="absolute bottom-2 left-[11px] top-2 w-0.5 bg-landing-outline-variant/20" />
+                        <div className="relative flex gap-4">
+                          <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-landing-primary">
+                            <Plane
+                              className="size-3.5 text-white"
+                              strokeWidth={2}
+                              fill="currentColor"
+                            />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-landing-primary">
+                              Flight Outbound
+                            </h4>
+                            <p className="mt-1 text-sm font-semibold">
+                              {currentItinerary.flight.outbound.origin} → {currentItinerary.flight.outbound.destination}
+                            </p>
+                            <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
+                              {formatDate(currentItinerary.flight.outbound.departureUtc)}, {currentItinerary.flight.outbound.airline}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="relative flex gap-4">
+                          <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
+                            <Hotel
+                              className="size-3.5 text-landing-on-surface-variant"
+                              strokeWidth={2}
+                            />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold uppercase tracking-wider">
+                              Accommodation
+                            </h4>
+                            <p className="mt-1 text-sm font-semibold">{currentItinerary.hotel.name}</p>
+                            <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
+                              {currentItinerary.hotel.nights} Nights •{' '}
+                              {currentItinerary.hotel.wasDowngraded ? 'Downgraded' : 'Suggested'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="relative flex gap-4">
+                          <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
+                            <Landmark
+                              className="size-3.5 text-landing-on-surface-variant"
+                              strokeWidth={2}
+                            />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold uppercase tracking-wider">
+                              Main Event
+                            </h4>
+                            <p className="mt-1 text-sm font-semibold">{currentItinerary.match.venue}</p>
+                            <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
+                              Kickoff: {formatDate(currentItinerary.match.kickoffUtc)}
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-landing-primary">
-                          Flight Outbound
-                        </h4>
-                        <p className="mt-1 text-sm font-semibold">
-                          {currentItinerary.flight.outbound.origin} → {currentItinerary.flight.outbound.destination}
-                        </p>
-                        <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                          {formatDate(currentItinerary.flight.outbound.departureUtc)}, {currentItinerary.flight.outbound.airline}
-                        </p>
+                      <div className="mt-6 rounded-2xl border border-landing-outline-variant/5 bg-white p-6 shadow-sm">
+                        <div className="mb-4 flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-landing-on-surface-variant">
+                            ESTIMATED COST
+                          </h4>
+                          <BarChart3
+                            className="size-4 text-landing-primary"
+                            strokeWidth={2}
+                          />
+                        </div>
+                        <div className="mb-6 space-y-3">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-landing-on-surface-variant">Flights</span>
+                            <span className="font-medium">{currentItinerary.cost.flightsEur} EUR</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-landing-on-surface-variant">Match Tickets</span>
+                            <span className="font-medium">{currentItinerary.cost.matchTicketEur} EUR</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-landing-on-surface-variant">Stay (Avg)</span>
+                            <span className="font-medium">{currentItinerary.cost.stayEur} EUR</span>
+                          </div>
+                        </div>
+                        <div className="flex items-end justify-between border-t border-landing-outline-variant/10 pt-4">
+                          <div>
+                            <p className="text-[10px] text-landing-on-surface-variant">TOTAL</p>
+                            <p className="font-headline text-2xl font-black text-landing-on-surface">
+                              {currentItinerary.cost.totalEur} EUR
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-landing-primary p-1 text-landing-primary-container">
+                            <CreditCard className="size-5" strokeWidth={2} />
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div className="relative flex gap-4">
-                      <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
-                        <Hotel
-                          className="size-3.5 text-landing-on-surface-variant"
-                          strokeWidth={2}
-                        />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold uppercase tracking-wider">
-                          Accommodation
-                        </h4>
-                        <p className="mt-1 text-sm font-semibold">{currentItinerary.hotel.name}</p>
-                        <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                          {currentItinerary.hotel.nights} Nights •{' '}
-                          {currentItinerary.hotel.wasDowngraded ? 'Downgraded' : 'Suggested'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="relative flex gap-4">
-                      <div className="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-landing-outline-variant/30 bg-landing-container-highest">
-                        <Landmark
-                          className="size-3.5 text-landing-on-surface-variant"
-                          strokeWidth={2}
-                        />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold uppercase tracking-wider">
-                          Main Event
-                        </h4>
-                        <p className="mt-1 text-sm font-semibold">{currentItinerary.match.venue}</p>
-                        <p className="mt-0.5 text-[10px] text-landing-on-surface-variant">
-                          Kickoff: {formatDate(currentItinerary.match.kickoffUtc)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-6 rounded-2xl border border-landing-outline-variant/5 bg-white p-6 shadow-sm">
-                    <div className="mb-4 flex items-center justify-between">
-                      <h4 className="text-xs font-bold text-landing-on-surface-variant">
-                        ESTIMATED COST
-                      </h4>
-                      <BarChart3
-                        className="size-4 text-landing-primary"
-                        strokeWidth={2}
-                      />
-                    </div>
-                    <div className="mb-6 space-y-3">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-landing-on-surface-variant">Flights</span>
-                        <span className="font-medium">{currentItinerary.cost.flightsEur} EUR</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-landing-on-surface-variant">Match Tickets</span>
-                        <span className="font-medium">{currentItinerary.cost.matchTicketEur} EUR</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-landing-on-surface-variant">Stay (Avg)</span>
-                        <span className="font-medium">{currentItinerary.cost.stayEur} EUR</span>
-                      </div>
-                    </div>
-                    <div className="flex items-end justify-between border-t border-landing-outline-variant/10 pt-4">
-                      <div>
-                        <p className="text-[10px] text-landing-on-surface-variant">TOTAL</p>
-                        <p className="font-headline text-2xl font-black text-landing-on-surface">
-                          {currentItinerary.cost.totalEur} EUR
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-landing-primary p-1 text-landing-primary-container">
-                        <CreditCard className="size-5" strokeWidth={2} />
-                      </div>
-                    </div>
-                  </div>
+                    </>
+                  )}
                   {currentActivities && (
                     <ActivitiesAccordion activities={currentActivities} />
                   )}

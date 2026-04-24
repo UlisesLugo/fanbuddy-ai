@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Codebase Knowledge Graph (RAG)
+
+Before exploring the codebase for unfamiliar symbols, files, or architectural questions, consult the pre-built knowledge graph in `graphify-out/`:
+
+| File | Use for |
+|------|---------|
+| `graphify-out/GRAPH_REPORT.md` | Human-readable summary of all nodes, clusters, and relationships — start here |
+| `graphify-out/graph.json` | Machine-readable graph data: nodes, edges, communities — query for precise symbol/file relationships |
+| `graphify-out/manifest.json` | Index of what was analyzed and when |
+
+**How to use:** When asked "where is X defined?", "what calls Y?", or "how does Z connect to W?" — read `GRAPH_REPORT.md` first. If you need edge-level detail, grep `graph.json` for the symbol name. Only fall back to direct file search if the graph doesn't have the answer.
+
 ## Commands
 
 ```bash
