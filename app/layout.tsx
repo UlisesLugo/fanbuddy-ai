@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Manrope } from "next/font/google";
+import { ClerkProvider } from '@clerk/nextjs';
 
 import "./globals.css";
 
@@ -23,12 +24,14 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="light">
-      <body
-        className={`${inter.className} ${inter.variable} ${manrope.variable} min-h-screen antialiased`}
-      >
-        {children}
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" className="light">
+        <body
+          className={`${inter.className} ${inter.variable} ${manrope.variable} min-h-screen antialiased`}
+        >
+          {children}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
