@@ -1,21 +1,13 @@
 'use client';
 
-import { Eye, EyeOff, HelpCircle, Radar } from 'lucide-react';
+import { HelpCircle, Radar } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
-import { FcGoogle } from 'react-icons/fc';
-import { SiApple } from 'react-icons/si';
 
 const STADIUM_IMAGE =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDOmFIiyMb4R4woo6sfO1iwwMXUoOuczFb44i_Aw7C-xCZH1vnSE5jMAyfDi7Of7O3mQ6Em7nM_R0sOYL8-UYxcCxCuJbWq8WpJqtEwRZGlhDttH2PniDohsF8YZMJ3sKAFvqX_LjofsM4xLoZcHr1xu9-xB9TKAKJey3emcz2hHKOZb4eFh7IHrKRQ1_bKuqH8kX9igTZWXqewEZ4d_j-TVGQ0czI6Ml00xrh9FnowoZ1KdchZs4x-dkbkGDBuuZfA9cgTaN3Buk0';
 
 export function MarketingLanding() {
-  const [showPassword, setShowPassword] = useState(false);
-
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-  }
 
   return (
     <>
@@ -84,7 +76,7 @@ export function MarketingLanding() {
         </section>
 
         {/* Right: onboarding */}
-        <section className="flex w-full flex-col justify-center bg-landing-surface px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-12 lg:w-[40%] lg:px-16 lg:pb-12">
+        <section className="flex w-full flex-col items-center justify-center bg-landing-surface px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-12 lg:w-[40%] lg:px-16 lg:pb-12">
           <div className="mx-auto w-full max-w-md min-w-0">
             <div className="mb-8 sm:mb-12">
               <h2 className="font-headline mb-1 text-xl font-black italic tracking-tighter text-landing-primary sm:mb-2 sm:text-2xl">
@@ -98,113 +90,32 @@ export function MarketingLanding() {
               </p>
             </div>
 
-            <div className="mb-8 space-y-4">
-              <button
-                type="button"
-                className="flex w-full items-center justify-center gap-3.5 rounded-xl border border-landing-outline-variant/10 bg-landing-container-lowest px-6 py-4 shadow-sm transition-all duration-200 hover:bg-landing-container"
-              >
-                <FcGoogle className="size-7 shrink-0 sm:size-8" aria-hidden />
-                <span className="font-semibold text-landing-on-surface">
-                  Continue with Google
-                </span>
-              </button>
-              <button
-                type="button"
-                className="flex w-full items-center justify-center gap-3.5 rounded-xl bg-landing-inverse px-6 py-4 text-white shadow-sm transition-all duration-200 hover:bg-zinc-800"
-              >
-                <SiApple className="size-7 shrink-0 sm:size-8" aria-hidden />
-                <span className="font-semibold text-white">
-                  Continue with Apple
-                </span>
-              </button>
-            </div>
-
-            <div className="relative mb-8 flex items-center gap-2 py-4 sm:gap-0 sm:py-5">
-              <div className="min-w-0 flex-1 border-t border-landing-outline-variant/20" />
-              <span className="max-w-[46%] shrink-0 text-center text-[9px] uppercase leading-tight tracking-widest text-landing-on-surface-variant sm:max-w-none sm:text-[10px]">
-                OR WITH EMAIL
-              </span>
-              <div className="min-w-0 flex-1 border-t border-landing-outline-variant/20" />
-            </div>
-
-            <form className="space-y-6" onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <label className="px-1 text-xs font-bold uppercase tracking-wider text-landing-on-surface-variant">
-                  Email address
-                </label>
-                <input
-                  type="email"
-                  placeholder="your@email.com"
-                  className="w-full rounded-xl border-0 bg-landing-container-low px-5 py-4 font-normal text-landing-on-surface outline-none transition-all placeholder:text-landing-outline focus:bg-landing-container-lowest focus:ring-2 focus:ring-landing-primary/20"
-                  autoComplete="email"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
-                  <label className="text-xs font-bold uppercase tracking-wider text-landing-on-surface-variant">
-                    Password
-                  </label>
-                  <Link
-                    href="#"
-                    className="w-fit text-xs font-semibold text-landing-primary hover:underline sm:shrink-0"
-                  >
-                    Forgot password?
-                  </Link>
-                </div>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    className="w-full rounded-xl border-0 bg-landing-container-low px-5 py-4 pr-12 font-normal text-landing-on-surface outline-none transition-all placeholder:text-landing-outline focus:bg-landing-container-lowest focus:ring-2 focus:ring-landing-primary/20"
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-landing-on-surface-variant"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={
-                      showPassword ? 'Hide password' : 'Show password'
-                    }
-                  >
-                    {showPassword ? (
-                      <EyeOff className="size-5" />
-                    ) : (
-                      <Eye className="size-5" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="mt-4 w-full min-h-[3.25rem] rounded-xl bg-pitch-gradient py-4 font-headline text-base font-bold text-white shadow-lg shadow-landing-primary/20 transition-all duration-200 hover:scale-[1.02] active:scale-95 sm:py-5 sm:text-lg"
+            <div className="space-y-4">
+              <Link
+                href="/sign-up"
+                className="flex w-full items-center justify-center rounded-xl bg-pitch-gradient px-6 py-4 font-headline text-base font-bold text-white shadow-lg shadow-landing-primary/20 transition-all duration-200 hover:scale-[1.02] active:scale-95 sm:text-lg"
               >
                 Create Account
-              </button>
-            </form>
-
-            <p className="mt-10 text-center text-sm text-landing-on-surface-variant">
-              Already have an account?{' '}
+              </Link>
               <Link
-                href="#"
-                className="font-bold text-landing-primary hover:underline"
+                href="/sign-in"
+                className="flex w-full items-center justify-center rounded-xl border border-landing-outline-variant/20 bg-landing-container-lowest px-6 py-4 font-semibold text-landing-on-surface transition-all duration-200 hover:bg-landing-container"
               >
                 Log In
               </Link>
-            </p>
+            </div>
 
-            <div className="mt-auto pt-8 text-center sm:pt-12">
-              <p className="text-[10px] font-normal uppercase leading-relaxed tracking-widest text-landing-outline">
-                By joining, you agree to our <br />
-                <Link href="#" className="underline">
-                  Terms of Service
-                </Link>{' '}
-                and{' '}
-                <Link href="#" className="underline">
-                  Privacy
-                </Link>
-              </p>
+            <div className="mt-12 space-y-3">
+              {[
+                'Real flights & hotels via Duffel + LiteAPI',
+                'AI-curated itineraries in seconds',
+                '3 free trips — no credit card required',
+              ].map((feature) => (
+                <div key={feature} className="flex items-center gap-3">
+                  <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-landing-primary" />
+                  <span className="text-sm text-landing-on-surface-variant">{feature}</span>
+                </div>
+              ))}
             </div>
           </div>
         </section>

@@ -1,11 +1,6 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 import { AIMessage, BaseMessage } from '@langchain/core/messages';
-import {
-  Annotation,
-  END,
-  START,
-  StateGraph,
-} from '@langchain/langgraph';
+import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { z } from 'zod';
@@ -173,7 +168,9 @@ const RouterSchema = z.object({
       checkOut: z.string().describe('Check-out date in YYYY-MM-DD format'),
     })
     .nullable()
-    .describe('Travel dates if the user provides specific dates. Null if not mentioned.'),
+    .describe(
+      'Travel dates if the user provides specific dates. Null if not mentioned.',
+    ),
   wants_date_recommendation: z
     .boolean()
     .describe(
@@ -189,11 +186,11 @@ const RouterSchema = z.object({
     ])
     .describe(
       'Stage of the trip-planning conversation based on what is already known. ' +
-      'Use collecting_team if favorite_team is unknown. ' +
-      'Use selecting_match if team is known and fixtures are loaded but no match is selected. ' +
-      'Use collecting_preferences if match is selected but origin_city or spending_tier is missing. ' +
-      'Use confirming_dates if match and preferences are known but travel_dates is missing. ' +
-      'Use trip_complete if trip_complete context value is true.',
+        'Use collecting_team if favorite_team is unknown. ' +
+        'Use selecting_match if team is known and fixtures are loaded but no match is selected. ' +
+        'Use collecting_preferences if match is selected but origin_city or spending_tier is missing. ' +
+        'Use confirming_dates if match and preferences are known but travel_dates is missing. ' +
+        'Use trip_complete if trip_complete context value is true.',
     ),
 });
 
@@ -209,6 +206,7 @@ async function router_node(state: State): Promise<Partial<State>> {
     ? `\nConversation context — the assistant just asked: "${lastAiMessage.content}"\n`
     : '';
 
+  const kickoffUtc = state.itinerary?.match?.kickoffUtc;
   const stateContext = `
 Current session state (use this to classify conversation_stage):
 - favorite_team: ${state.user_preferences.favorite_team || 'UNKNOWN'}
@@ -217,6 +215,7 @@ Current session state (use this to classify conversation_stage):
 - origin_city: ${state.user_preferences.origin_city || 'UNKNOWN'}
 - spending_tier: ${state.user_preferences.spending_tier ?? 'UNKNOWN'}
 - travel_dates: ${state.user_preferences.travel_dates ? `${state.user_preferences.travel_dates.checkIn} to ${state.user_preferences.travel_dates.checkOut}` : 'UNKNOWN'}
+- match kickoff (UTC): ${kickoffUtc ?? 'UNKNOWN'} — use this to resolve relative date expressions like "three days before" or "the day of the match"
 - trip_complete: ${state.trip_complete}
 `;
 
@@ -237,20 +236,41 @@ User message: "${lastMessage.content}"`,
   );
 
   const stage = result.conversation_stage;
-  const isComplete = stage === 'trip_complete';
+
+  // trip_complete is write-once-true: only generate_links_node (free tier) and
+  // formatter_node (paid tier) may promote it. The LLM sometimes incorrectly
+  // classifies 'trip_complete' right after the user provides the last preference
+  // (e.g. travel dates) — in that case we preserve the current stage so
+  // confirm_dates_node can proceed and route to the correct planning path.
+  const tripAlreadyComplete = state.trip_complete;
+  const effectiveStage =
+    stage === 'trip_complete' && !tripAlreadyComplete
+      ? state.conversation_stage
+      : stage;
 
   return {
     user_preferences: {
       origin_city: result.origin_city ?? state.user_preferences.origin_city,
-      favorite_team: result.favorite_team ?? state.user_preferences.favorite_team,
-      selected_match_id: result.selected_match_id ?? state.user_preferences.selected_match_id ?? null,
-      travel_dates: result.travel_dates ?? state.user_preferences.travel_dates ?? null,
-      spending_tier: result.spending_tier ?? state.user_preferences.spending_tier ?? null,
+      favorite_team:
+        result.favorite_team ?? state.user_preferences.favorite_team,
+      selected_match_id:
+        result.selected_match_id ??
+        state.user_preferences.selected_match_id ??
+        null,
+      travel_dates:
+        result.travel_dates ?? state.user_preferences.travel_dates ?? null,
+      spending_tier:
+        result.spending_tier ?? state.user_preferences.spending_tier ?? null,
     },
     wants_date_recommendation: result.wants_date_recommendation,
-    conversation_stage: stage,
-    trip_complete: isComplete || state.trip_complete,
-    ...(isComplete ? { direct_reply: TRIP_COMPLETE_MSG, messages: [new AIMessage(TRIP_COMPLETE_MSG)] } : {}),
+    conversation_stage: effectiveStage,
+    trip_complete: tripAlreadyComplete,
+    ...(tripAlreadyComplete
+      ? {
+          direct_reply: TRIP_COMPLETE_MSG,
+          messages: [new AIMessage(TRIP_COMPLETE_MSG)],
+        }
+      : {}),
   };
 }
 
@@ -262,7 +282,8 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
   const { favorite_team: teamName, selected_match_id } = state.user_preferences;
 
   if (!teamName) {
-    const reply = "Which football team would you like to watch? I'll find their upcoming fixtures.";
+    const reply =
+      "Which football team would you like to watch? I'll find their upcoming fixtures.";
     return { direct_reply: reply, messages: [new AIMessage(reply)] };
   }
 
@@ -280,7 +301,15 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
   const dateFrom = minPlanDate.toISOString().slice(0, 10);
   const dateTo = ninetyDaysOut.toISOString().slice(0, 10);
 
-  let fixtures: Array<{ id: number; homeTeam: { name: string }; awayTeam: { name: string }; utcDate: string; competition: { name: string }; venue: string | null; status: string }>;
+  let fixtures: Array<{
+    id: number;
+    homeTeam: { name: string };
+    awayTeam: { name: string };
+    utcDate: string;
+    competition: { name: string };
+    venue: string | null;
+    status: string;
+  }>;
 
   if (state.fixture_list?.length) {
     // Use cached fixture list — skip searchFixtures API call
@@ -298,7 +327,8 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       fixtures = await searchFixtures(teamId, dateFrom, dateTo);
     } catch (err) {
       console.error('[list_matches_node] football-data.org call failed:', err);
-      const reply = 'I had trouble fetching fixtures right now. Please try again in a moment.';
+      const reply =
+        'I had trouble fetching fixtures right now. Please try again in a moment.';
       return { direct_reply: reply, messages: [new AIMessage(reply)] };
     }
   }
@@ -321,7 +351,11 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
       status: f.status,
     }));
     const reply = formatFixtureList(summaries);
-    return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
+    return {
+      direct_reply: reply,
+      fixture_list: summaries,
+      messages: [new AIMessage(reply)],
+    };
   }
 
   // Match selected — resolve by 1-based index
@@ -338,7 +372,11 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
     const reply =
       `I didn't catch which match you meant. Here are the options again:\n\n` +
       formatFixtureList(summaries);
-    return { direct_reply: reply, fixture_list: summaries, messages: [new AIMessage(reply)] };
+    return {
+      direct_reply: reply,
+      fixture_list: summaries,
+      messages: [new AIMessage(reply)],
+    };
   }
 
   const fixture = upcoming[index];
@@ -378,7 +416,11 @@ async function list_matches_node(state: State): Promise<Partial<State>> {
     tvConfirmed: toFanBuddyStatus(fixture.status) === 'CONFIRMED',
     match_city: venueGeo?.city ?? venueName,
     ...(venueGeo
-      ? { lat: venueGeo.lat, lng: venueGeo.lng, nearestAirportCode: venueGeo.nearestAirportCode }
+      ? {
+          lat: venueGeo.lat,
+          lng: venueGeo.lng,
+          nearestAirportCode: venueGeo.nearestAirportCode,
+        }
       : {}),
   };
 
@@ -428,12 +470,14 @@ async function confirm_dates_node(state: State): Promise<Partial<State>> {
   if (state.wants_date_recommendation) {
     const match = state.itinerary?.match;
     if (!match) {
-      const reply = 'I lost track of the match details. Could you pick a match again?';
+      const reply =
+        'I lost track of the match details. Could you pick a match again?';
       return { direct_reply: reply, messages: [new AIMessage(reply)] };
     }
 
     if (!spending_tier) {
-      const reply = 'Please choose a spending style first: Luxury, Value, or Budget.';
+      const reply =
+        'Please choose a spending style first: Luxury, Value, or Budget.';
       return { direct_reply: reply, messages: [new AIMessage(reply)] };
     }
     const dates = recommendTravelDates(match.kickoffUtc, spending_tier);
@@ -465,14 +509,20 @@ async function generate_links_node(state: State): Promise<Partial<State>> {
   const { origin_city, travel_dates } = state.user_preferences;
 
   if (!match || !travel_dates) {
-    const reply = 'Something went wrong putting your trip together. Please start over.';
+    const reply =
+      'Something went wrong putting your trip together. Please start over.';
     return { direct_reply: reply, messages: [new AIMessage(reply)] };
   }
 
   const matchCity = match.match_city ?? match.venue;
   const { checkIn, checkOut } = travel_dates;
 
-  const transportUrl = buildTransportUrl(origin_city, matchCity, checkIn, checkOut);
+  const transportUrl = buildTransportUrl(
+    origin_city,
+    matchCity,
+    checkIn,
+    checkOut,
+  );
   const accommodationUrl = buildAccommodationUrl(matchCity, checkIn, checkOut);
 
   const links: FreeTierLinks = {
@@ -647,6 +697,18 @@ const BUDGET_BASELINE_EUR = 800;
 
 async function plan_travel_node(state: State): Promise<Partial<State>> {
   const match = state.itinerary?.match;
+  const { travel_dates } = state.user_preferences;
+
+  if (!travel_dates?.checkIn || !travel_dates?.checkOut) {
+    return {
+      validation_errors: ['No travel dates available — cannot plan travel'],
+      attempt_count: 3, // exit retry loop
+      flight_results: null,
+      flight_results_cursor: 0,
+      hotel_results: null,
+      hotel_results_cursor: 0,
+    };
+  }
 
   // Guard: match must exist to derive travel dates
   if (!match) {
@@ -661,15 +723,8 @@ async function plan_travel_node(state: State): Promise<Partial<State>> {
   }
 
   // ── Date derivation ────────────────────────────────────────────────────────
-  const kickoff = new Date(match.kickoffUtc);
-  const matchEndMs = kickoff.getTime() + 105 * 60 * 1000; // kickoff + 105 min
-
-  // Arrive the day before the match, depart the day after it ends.
-  // Use UTC date methods to avoid local-timezone drift on Amadeus date params.
-  const departureDate = new Date(kickoff);
-  departureDate.setUTCDate(departureDate.getUTCDate() - 1);
-  const returnDate = new Date(matchEndMs);
-  returnDate.setUTCDate(returnDate.getUTCDate() + 1);
+  const departureDate = new Date(travel_dates.checkIn);
+  const returnDate = new Date(travel_dates.checkOut);
 
   const departureDateStr = departureDate.toISOString().slice(0, 10);
   const returnDateStr = returnDate.toISOString().slice(0, 10);
@@ -986,10 +1041,7 @@ Flight: ${itinerary.flight.outbound.airline}, €${flightsEur}. Hotel: ${itinera
 
 // ─── Conditional Edges ────────────────────────────────────────────────────────
 
-function afterDirectReply(
-  state: State,
-  nextNode: string,
-): string | typeof END {
+function afterDirectReply(state: State, nextNode: string): string | typeof END {
   return state.direct_reply ? END : nextNode;
 }
 
@@ -1020,13 +1072,17 @@ export function routeAfterDates(
   state: Pick<State, 'direct_reply' | 'user_plan'>,
 ): string | typeof END {
   if (state.direct_reply) return END;
-  return state.user_plan === 'paid' ? 'plan_travel_node' : 'generate_links_node';
+  return state.user_plan === 'paid'
+    ? 'plan_travel_node'
+    : 'generate_links_node';
 }
 
 export function shouldRetryOrFinish(
   state: Pick<State, 'validation_errors' | 'attempt_count'>,
 ): string {
-  const hardErrors = state.validation_errors.filter((e) => !e.includes('PROVISIONAL'));
+  const hardErrors = state.validation_errors.filter(
+    (e) => !e.includes('PROVISIONAL'),
+  );
   if (hardErrors.length > 0 && state.attempt_count < 3) {
     return 'plan_travel_node';
   }
@@ -1057,16 +1113,12 @@ const _graph = new StateGraph(GraphState)
   .addNode('validator_node', validator_node)
   .addNode('formatter_node', formatter_node)
   .addEdge(START, 'router_node')
-  .addConditionalEdges(
-    'router_node',
-    routeFromRouter,
-    {
-      list_matches_node: 'list_matches_node',
-      collect_preferences_node: 'collect_preferences_node',
-      confirm_dates_node: 'confirm_dates_node',
-      [END]: END,
-    },
-  )
+  .addConditionalEdges('router_node', routeFromRouter, {
+    list_matches_node: 'list_matches_node',
+    collect_preferences_node: 'collect_preferences_node',
+    confirm_dates_node: 'confirm_dates_node',
+    [END]: END,
+  })
   .addConditionalEdges(
     'list_matches_node',
     (state) => afterDirectReply(state, 'collect_preferences_node'),
@@ -1077,24 +1129,16 @@ const _graph = new StateGraph(GraphState)
     (state) => afterDirectReply(state, 'confirm_dates_node'),
     { confirm_dates_node: 'confirm_dates_node', [END]: END },
   )
-  .addConditionalEdges(
-    'confirm_dates_node',
-    routeAfterDates,
-    {
-      generate_links_node: 'generate_links_node',
-      plan_travel_node: 'plan_travel_node',
-      [END]: END,
-    },
-  )
+  .addConditionalEdges('confirm_dates_node', routeAfterDates, {
+    generate_links_node: 'generate_links_node',
+    plan_travel_node: 'plan_travel_node',
+    [END]: END,
+  })
   .addEdge('generate_links_node', 'activities_node')
-  .addConditionalEdges(
-    'validator_node',
-    shouldRetryOrFinish,
-    {
-      plan_travel_node: 'plan_travel_node',
-      formatter_node: 'formatter_node',
-    },
-  )
+  .addConditionalEdges('validator_node', shouldRetryOrFinish, {
+    plan_travel_node: 'plan_travel_node',
+    formatter_node: 'formatter_node',
+  })
   .addEdge('plan_travel_node', 'validator_node')
   .addEdge('formatter_node', 'activities_node')
   .addEdge('activities_node', END);

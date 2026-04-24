@@ -772,7 +772,19 @@ export function PlanningChat() {
               Subscription
             </a>
           </nav>
-          <div className="mt-auto px-4 pb-8">
+          <div className="mt-auto px-4 pb-8 space-y-3">
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch('/api/stripe/checkout', { method: 'POST' });
+                const { url } = await res.json() as { url: string };
+                window.location.href = url;
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-600/30 bg-emerald-50 py-3 font-headline font-bold text-emerald-700 transition-all hover:bg-emerald-100 active:scale-95"
+            >
+              <Crown className="size-4 shrink-0" strokeWidth={2} />
+              Upgrade to Pro
+            </button>
             <button
               type="button"
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-pitch-gradient py-3 font-headline font-bold text-white shadow-lg shadow-emerald-600/20 transition-transform active:scale-95"
