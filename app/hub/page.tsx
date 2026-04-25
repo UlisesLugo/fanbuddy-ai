@@ -3,6 +3,7 @@
 import { AlertCircle, Calendar, LayoutGrid, MapPin } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import AppShell from '@/components/shared/AppShell';
 
 type TripRecord = {
   id: string;
@@ -69,7 +70,8 @@ export default function HubPage() {
   }, [fetchTrips]);
 
   return (
-    <div className="min-h-screen bg-landing-surface px-6 py-12">
+    <AppShell activePage="hub">
+      <div className="flex-1 overflow-y-auto px-6 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8 flex items-center gap-3">
           <LayoutGrid className="size-7 text-emerald-600" strokeWidth={2} />
@@ -145,6 +147,7 @@ export default function HubPage() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </AppShell>
   );
 }
