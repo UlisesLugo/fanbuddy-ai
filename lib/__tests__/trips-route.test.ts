@@ -10,14 +10,14 @@ const mockWhere = jest.fn();
 const mockFrom = jest.fn();
 const mockSelect = jest.fn();
 jest.mock('@/lib/db', () => ({
-  db: { select: () => mockSelect() },
+  db: { select: (...args: unknown[]) => mockSelect(...args) },
 }));
 jest.mock('drizzle-orm', () => ({
   eq: jest.fn(),
   desc: jest.fn(),
 }));
 jest.mock('@/lib/db/schema', () => ({
-  trips: {},
+  trips: { user_id: 'user_id' },
 }));
 
 describe('GET /api/trips', () => {
@@ -30,7 +30,7 @@ describe('GET /api/trips', () => {
 
   it('returns 401 when not authenticated', async () => {
     mockAuth.mockResolvedValue({ userId: null });
-    const res = await GET();
+    const res = await GET({} as Request);
     expect(res.status).toBe(401);
   });
 
@@ -48,20 +48,29 @@ describe('GET /api/trips', () => {
       },
     ];
     mockOrderBy.mockResolvedValue(fakeRows);
-    const res = await GET();
+    const res = await GET({} as Request);
     expect(res.status).toBe(200);
     const body = await res.json() as { trips: typeof fakeRows };
     expect(body.trips).toHaveLength(1);
     expect(body.trips[0].team).toBe('Barcelona');
     expect(body.trips[0].tier).toBe('paid');
+    const { eq } = jest.requireMock('drizzle-orm') as { eq: jest.Mock };
+    expect(eq).toHaveBeenCalledWith(expect.anything(), 'user_123');
   });
 
   it('returns empty array when user has no trips', async () => {
     mockAuth.mockResolvedValue({ userId: 'user_456' });
     mockOrderBy.mockResolvedValue([]);
-    const res = await GET();
+    const res = await GET({} as Request);
     expect(res.status).toBe(200);
     const body = await res.json() as { trips: unknown[] };
     expect(body.trips).toEqual([]);
+  });
+
+  it('returns 500 when DB throws', async () => {
+    mockAuth.mockResolvedValue({ userId: 'user_123' });
+    mockOrderBy.mockRejectedValue(new Error('connection timeout'));
+    const res = await GET({} as Request);
+    expect(res.status).toBe(500);
   });
 });
