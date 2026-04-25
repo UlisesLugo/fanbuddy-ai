@@ -744,7 +744,7 @@ export function PlanningChat() {
           </div>
           <nav className="flex flex-col gap-2" aria-label="Main">
             <Link
-              href="/"
+              href="/hub"
               className="mx-2 my-1 flex items-center gap-3 rounded-lg px-4 py-3 font-headline text-sm font-semibold text-zinc-600 transition-all duration-300 hover:bg-zinc-200/50"
             >
               <LayoutGrid className="size-5 shrink-0" strokeWidth={2} />
@@ -1108,7 +1108,7 @@ export function PlanningChat() {
         aria-label="Mobile"
       >
         <Link
-          href="/"
+          href="/hub"
           className="flex flex-col items-center justify-center p-2 text-landing-on-surface/50"
         >
           <LayoutGrid className="size-6" strokeWidth={2} />
