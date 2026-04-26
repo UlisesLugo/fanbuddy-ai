@@ -65,7 +65,7 @@ const fakeItinerary = {
 };
 
 function makeRequest(id: string) {
-  return { params: { id } } as unknown as Parameters<typeof GET>[1];
+  return { params: Promise.resolve({ id }) } as unknown as Parameters<typeof GET>[1];
 }
 
 describe('GET /api/trips/[id]', () => {

@@ -11,15 +11,16 @@ export const runtime = 'nodejs';
 
 export async function GET(
   _request: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { userId } = await auth();
   if (!userId) return new Response('Unauthorized', { status: 401 });
 
+  const { id } = await params;
   const [trip] = await db
     .select()
     .from(trips)
-    .where(eq(trips.id, params.id));
+    .where(eq(trips.id, id));
 
   if (!trip) return new Response('Not Found', { status: 404 });
   if (trip.user_id !== userId) return new Response('Forbidden', { status: 403 });
