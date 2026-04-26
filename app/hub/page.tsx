@@ -122,7 +122,7 @@ export default function HubPage() {
         {status === 'loaded' && tripList.length > 0 && (
           <div className="flex flex-col gap-4">
             {tripList.map((trip) => (
-              <div key={trip.id} className="glass-panel rounded-2xl p-5">
+              <Link key={trip.id} href={`/hub/${trip.id}`} className="glass-panel block rounded-2xl p-5 transition-shadow hover:shadow-md">
                 <div className="mb-1 flex items-center justify-between">
                   <span className="font-headline text-lg font-bold text-landing-on-surface">
                     {trip.team}
@@ -142,7 +142,7 @@ export default function HubPage() {
                     {trip.destination}
                   </span>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
