@@ -2,7 +2,7 @@
 
 import { AlertCircle, ArrowLeft, Bot } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 
 import AppShell from '@/components/shared/AppShell';
 import ItineraryPanel from '@/components/shared/ItineraryPanel';
@@ -67,14 +67,15 @@ function SkeletonPane() {
   );
 }
 
-export default function TripDetailPage({ params }: { params: { id: string } }) {
+export default function TripDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const [data, setData] = useState<TripDetailData | null>(null);
   const [status, setStatus] = useState<'loading' | 'loaded' | 'error' | 'not-found'>('loading');
 
   const fetchTrip = useCallback(async () => {
     setStatus('loading');
     try {
-      const res = await fetch(`/api/trips/${params.id}`);
+      const res = await fetch(`/api/trips/${id}`);
       if (res.status === 404 || res.status === 403) {
         setStatus('not-found');
         return;
@@ -86,7 +87,7 @@ export default function TripDetailPage({ params }: { params: { id: string } }) {
     } catch {
       setStatus('error');
     }
-  }, [params.id]);
+  }, [id]);
 
   useEffect(() => {
     void fetchTrip();
