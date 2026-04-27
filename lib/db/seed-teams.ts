@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 // Load .env file manually
-const envPath = join(process.cwd(), '.env');
+const envPath = join(process.cwd(), '.env.local');
 const envContent = readFileSync(envPath, 'utf-8');
 envContent.split('\n').forEach((line) => {
   const match = line.match(/^([^=]+)=(.*)$/);
