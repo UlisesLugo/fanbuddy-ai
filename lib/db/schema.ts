@@ -11,6 +11,11 @@ import {
 export const planEnum = pgEnum('plan', ['free', 'paid']);
 export const tierEnum = pgEnum('tier', ['free', 'paid']);
 
+export const teams = pgTable('teams', {
+  id: integer('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+});
+
 export const users = pgTable('users', {
   id: varchar('id', { length: 255 }).primaryKey(), // Clerk userId
   email: varchar('email', { length: 255 }).notNull(),
@@ -20,6 +25,8 @@ export const users = pgTable('users', {
   trips_used: integer('trips_used').notNull().default(0),
   stripe_customer_id: varchar('stripe_customer_id', { length: 255 }),
   stripe_subscription_id: varchar('stripe_subscription_id', { length: 255 }),
+  home_city: varchar('home_city', { length: 255 }),
+  favorite_team_id: integer('favorite_team_id').references(() => teams.id),
   created_at: timestamp('created_at').notNull().defaultNow(),
 });
 
