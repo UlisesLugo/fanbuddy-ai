@@ -6,7 +6,7 @@ import Link from 'next/link';
 
 interface AppShellProps {
   children: React.ReactNode;
-  activePage?: 'hub' | 'chat';
+  activePage?: 'hub' | 'chat' | 'profile';
 }
 
 const navBase =
@@ -68,10 +68,13 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
               <Compass className="size-5 shrink-0" strokeWidth={2} />
               Voyage Mode
             </Link>
-            <a href="#" className={`${navBase} ${navInactive}`}>
+            <Link
+              href="/profile"
+              className={`${navBase} ${activePage === 'profile' ? navActive : navInactive}`}
+            >
               <Crown className="size-5 shrink-0" strokeWidth={2} />
-              Subscription
-            </a>
+              Profile
+            </Link>
           </nav>
           <div className="mt-auto space-y-3 px-4 pb-8">
             <button
