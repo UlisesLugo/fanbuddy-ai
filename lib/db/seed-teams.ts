@@ -1,19 +1,20 @@
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-// Load .env file manually
+import { neon } from '@neondatabase/serverless';
+import { drizzle } from 'drizzle-orm/neon-http';
+
+import { teams } from './schema';
+
 const envPath = join(process.cwd(), '.env.local');
-const envContent = readFileSync(envPath, 'utf-8');
+const envContent = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
+if (!envContent) console.warn('[seed] .env.local not found — relying on process env');
 envContent.split('\n').forEach((line) => {
   const match = line.match(/^([^=]+)=(.*)$/);
   if (match && !process.env[match[1]]) {
     process.env[match[1]] = match[2].replace(/^"(.*)"$/, '$1');
   }
 });
-
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-import { teams } from './schema';
 
 const TEAMS = [
   { id: 4, name: 'Borussia Dortmund' },
@@ -44,7 +45,9 @@ const TEAMS = [
 ];
 
 async function seed() {
-  const sql = neon(process.env.DATABASE_URL!);
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) throw new Error('[seed] DATABASE_URL is not set. Check .env.local.');
+  const sql = neon(dbUrl);
   const db = drizzle(sql);
   await db.insert(teams).values(TEAMS).onConflictDoNothing();
   console.log(`Seeded ${TEAMS.length} teams.`);
