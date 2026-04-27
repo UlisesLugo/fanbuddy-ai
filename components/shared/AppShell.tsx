@@ -135,13 +135,13 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
           />
           <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Voyage</span>
         </Link>
-        <a
-          href="#"
-          className="flex flex-col items-center justify-center p-2 text-landing-on-surface/50"
+        <Link
+          href="/profile"
+          className={`flex flex-col items-center justify-center p-2 ${activePage === 'profile' ? 'text-emerald-700' : 'text-landing-on-surface/50'}`}
         >
           <Crown className="size-6" strokeWidth={2} />
-          <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Plans</span>
-        </a>
+          <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Profile</span>
+        </Link>
       </nav>
     </div>
   );
