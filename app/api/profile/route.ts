@@ -55,9 +55,14 @@ export async function PATCH(request: Request) {
   if (!userId) return new Response('Unauthorized', { status: 401 });
 
   try {
-    const body = (await request.json()) as {
-      home_city?: string | null;
-      favorite_team_id?: number | null;
+    const raw = (await request.json()) as Record<string, unknown>;
+    const body = {
+      ...('home_city' in raw && {
+        home_city: typeof raw.home_city === 'string' ? raw.home_city : null,
+      }),
+      ...('favorite_team_id' in raw && {
+        favorite_team_id: typeof raw.favorite_team_id === 'number' ? raw.favorite_team_id : null,
+      }),
     };
 
     if (body.favorite_team_id != null) {
@@ -70,7 +75,7 @@ export async function PATCH(request: Request) {
       }
     }
 
-    const patch: Record<string, unknown> = {};
+    const patch: { home_city?: string | null; favorite_team_id?: number | null } = {};
     if ('home_city' in body) patch.home_city = body.home_city ?? null;
     if ('favorite_team_id' in body) patch.favorite_team_id = body.favorite_team_id ?? null;
 

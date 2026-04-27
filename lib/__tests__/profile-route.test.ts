@@ -13,10 +13,6 @@ jest.mock('@/lib/db/schema', () => ({
   teams: { id: 'id', name: 'name' },
 }));
 
-// DB mock — flexible enough for all chain shapes used by this route
-const mockWhere = jest.fn();
-const mockLeftJoin = jest.fn();
-const mockFrom = jest.fn();
 const mockSelect = jest.fn();
 const mockUpdateWhere = jest.fn();
 const mockSet = jest.fn();
@@ -153,11 +149,18 @@ describe('PATCH /api/profile', () => {
     expect(mockUpdateWhere).toHaveBeenCalled();
   });
 
-  it('returns 500 on DB error', async () => {
+  it('returns 500 on DB error during fetchProfile', async () => {
     mockAuth.mockResolvedValue({ userId: 'user_123' });
     mockSelect.mockReturnValueOnce({
       from: () => ({ leftJoin: () => ({ where: jest.fn().mockRejectedValue(new Error('db fail')) }) }),
     });
+    const res = await PATCH(mockReq({ home_city: 'London' }));
+    expect(res.status).toBe(500);
+  });
+
+  it('returns 500 on DB error during update', async () => {
+    mockAuth.mockResolvedValue({ userId: 'user_123' });
+    mockUpdate.mockImplementationOnce(() => { throw new Error('update fail'); });
     const res = await PATCH(mockReq({ home_city: 'London' }));
     expect(res.status).toBe(500);
   });
