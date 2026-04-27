@@ -399,6 +399,8 @@ export function PlanningChat() {
   } | null>(null);
   // Stable thread_id for this session — enables conversation memory across messages
   const [threadId] = useState(() => crypto.randomUUID());
+  const [hasSentFirst, setHasSentFirst] = useState(false);
+  const hasSentFirstRef = useRef(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const skipInitialScrollRef = useRef(true);
 
@@ -511,7 +513,9 @@ export function PlanningChat() {
       setLoadingMessage('Connecting...');
 
       try {
-        const isFirstMessage = items.length === 0;
+        const isFirstMessage = !hasSentFirstRef.current;
+        hasSentFirstRef.current = true;
+        setHasSentFirst(true);
         const body: Record<string, unknown> = { message: trimmed, thread_id: threadId };
 
         if (isFirstMessage && savedPrefs) {
@@ -598,7 +602,7 @@ export function PlanningChat() {
         setLoadingMessage('FanBuddy is planning your trip...');
       }
     },
-    [isLoading, items, savedPrefs, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks, pushAiFixtures, pushUpgradePrompt],
+    [isLoading, savedPrefs, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks, pushAiFixtures, pushUpgradePrompt],
   );
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -651,7 +655,7 @@ export function PlanningChat() {
                 ref={scrollAreaRef}
                 className="no-scrollbar flex flex-1 flex-col space-y-8 overflow-y-auto p-4 sm:p-8"
               >
-                {savedPrefs && items.length === 0 && (
+                {savedPrefs && !hasSentFirst && (
                   <div className="flex max-w-[85%] gap-4">
                     <AiAvatar />
                     <div className="space-y-2">
