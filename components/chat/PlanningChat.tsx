@@ -20,6 +20,7 @@ import {
   FormEvent,
   KeyboardEvent,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -392,6 +393,10 @@ export function PlanningChat() {
   const [loadingMessage, setLoadingMessage] = useState('FanBuddy is planning your trip...');
   const [currentItinerary, setCurrentItinerary] = useState<FormattedItinerary | null>(null);
   const [currentActivities, setCurrentActivities] = useState<ActivitiesData | null>(null);
+  const [savedPrefs, setSavedPrefs] = useState<{
+    home_city: string;
+    favorite_team: { id: number; name: string };
+  } | null>(null);
   // Stable thread_id for this session — enables conversation memory across messages
   const [threadId] = useState(() => crypto.randomUUID());
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -406,6 +411,17 @@ export function PlanningChat() {
     }
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [items, isLoading]);
+
+  useEffect(() => {
+    fetch('/api/profile')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { home_city: string | null; favorite_team: { id: number; name: string } | null } | null) => {
+        if (data?.home_city && data?.favorite_team) {
+          setSavedPrefs({ home_city: data.home_city, favorite_team: data.favorite_team });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const pushUserMessage = useCallback((text: string) => {
     setItems((prev) => [
@@ -495,13 +511,23 @@ export function PlanningChat() {
       setLoadingMessage('Connecting...');
 
       try {
+        const isFirstMessage = items.length === 0;
+        const body: Record<string, unknown> = { message: trimmed, thread_id: threadId };
+
+        if (isFirstMessage && savedPrefs) {
+          body.user_preferences = {
+            origin_city: savedPrefs.home_city,
+            favorite_team: savedPrefs.favorite_team.name,
+            selected_match_id: null,
+            travel_dates: null,
+            spending_tier: null,
+          };
+        }
+
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: trimmed,
-            thread_id: threadId,
-          }),
+          body: JSON.stringify(body),
         });
 
         if (!res.ok) {
@@ -572,7 +598,7 @@ export function PlanningChat() {
         setLoadingMessage('FanBuddy is planning your trip...');
       }
     },
-    [isLoading, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks, pushAiFixtures, pushUpgradePrompt],
+    [isLoading, items, savedPrefs, threadId, pushUserMessage, pushAiText, pushAiCards, pushAiLinks, pushAiFixtures, pushUpgradePrompt],
   );
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -625,6 +651,19 @@ export function PlanningChat() {
                 ref={scrollAreaRef}
                 className="no-scrollbar flex flex-1 flex-col space-y-8 overflow-y-auto p-4 sm:p-8"
               >
+                {savedPrefs && items.length === 0 && (
+                  <div className="flex max-w-[85%] gap-4">
+                    <AiAvatar />
+                    <div className="space-y-2">
+                      <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-[15px] leading-[1.65] text-landing-on-surface/80">
+                        Planning a trip from <strong>{savedPrefs.home_city}</strong> for{' '}
+                        <strong>{savedPrefs.favorite_team.name}</strong>? Type anything to confirm, or tell
+                        me something different.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {items.map((m) => {
                   if (m.role === 'user') {
                     return (

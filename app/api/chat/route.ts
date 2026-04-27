@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
   // ── Parse body ────────────────────────────────────────────────────────────────
   const body = (await request.json()) as Partial<ChatApiRequest>;
-  const { message, thread_id } = body;
+  const { message, thread_id, user_preferences } = body;
 
   if (!message || !thread_id) {
     return Response.json(
@@ -101,6 +101,7 @@ export async function POST(request: Request) {
           free_tier_links: null,
           wants_date_recommendation: false,
           user_plan: user.plan as 'free' | 'paid',
+          ...(user_preferences ? { user_preferences } : {}),
         };
 
         const graphStream = await compiledGraph.stream(initialState, {
