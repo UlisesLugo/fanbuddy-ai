@@ -38,6 +38,8 @@ describe('GET /api/teams', () => {
     const body = (await res.json()) as { teams: { id: number; name: string }[] };
     expect(body.teams).toHaveLength(2);
     expect(body.teams[0].name).toBe('Arsenal');
+    const { asc } = jest.requireMock('drizzle-orm') as { asc: jest.Mock };
+    expect(asc).toHaveBeenCalledWith('name');
   });
 
   it('returns 500 on DB error', async () => {
