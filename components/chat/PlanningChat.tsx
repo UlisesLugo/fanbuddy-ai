@@ -518,6 +518,8 @@ export function PlanningChat() {
         setHasSentFirst(true);
         const body: Record<string, unknown> = { message: trimmed, thread_id: threadId };
 
+        // savedPrefs may be null if the profile fetch hasn't resolved yet (user typed very fast).
+        // In that case we skip pre-seeding; the graph will ask for preferences normally.
         if (isFirstMessage && savedPrefs) {
           body.user_preferences = {
             origin_city: savedPrefs.home_city,
