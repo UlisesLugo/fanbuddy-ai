@@ -71,7 +71,7 @@ export default function ProfilePage() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const handleSave = async () => {
     setSaveStatus('saving');
@@ -184,7 +184,7 @@ export default function ProfilePage() {
               id="home-city"
               type="text"
               value={homeCity}
-              onChange={(e) => setHomeCity(e.target.value)}
+              onChange={(e) => { setHomeCity(e.target.value); setSaveStatus('idle'); }}
               placeholder="e.g. London"
               disabled={saveStatus === 'saving'}
               className="w-full rounded-xl border border-landing-outline-variant/30 bg-white px-4 py-2.5 text-sm text-landing-on-surface outline-none focus:border-landing-primary/60 focus:ring-2 focus:ring-landing-primary/20 disabled:opacity-50"
@@ -201,7 +201,7 @@ export default function ProfilePage() {
             <select
               id="favorite-team"
               value={teamId}
-              onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : '')}
+              onChange={(e) => { setTeamId(e.target.value ? Number(e.target.value) : ''); setSaveStatus('idle'); }}
               disabled={saveStatus === 'saving'}
               className="w-full rounded-xl border border-landing-outline-variant/30 bg-white px-4 py-2.5 text-sm text-landing-on-surface outline-none focus:border-landing-primary/60 focus:ring-2 focus:ring-landing-primary/20 disabled:opacity-50"
             >
@@ -217,7 +217,7 @@ export default function ProfilePage() {
           <div className="flex items-center gap-4">
             <button
               type="button"
-              onClick={handleSave}
+              onClick={() => void handleSave()}
               disabled={!isDirty || saveStatus === 'saving'}
               className="rounded-xl bg-pitch-gradient px-6 py-2.5 font-headline font-bold text-white shadow shadow-emerald-600/20 transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
             >
