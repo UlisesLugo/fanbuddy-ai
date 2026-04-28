@@ -1046,7 +1046,7 @@ function afterDirectReply(state: State, nextNode: string): string | typeof END {
 }
 
 export function routeFromRouter(
-  state: Pick<State, 'trip_complete' | 'conversation_stage' | 'itinerary'>,
+  state: Pick<State, 'trip_complete' | 'conversation_stage'>,
 ): string | typeof END {
   if (state.trip_complete) return END;
   switch (state.conversation_stage) {
@@ -1054,13 +1054,9 @@ export function routeFromRouter(
     case 'selecting_match':
       return 'list_matches_node';
     case 'collecting_preferences':
+      return 'collect_preferences_node';
     case 'confirming_dates':
-      // If a match ID was just selected but the fixture hasn't been geocoded yet,
-      // pass through list_matches_node first so it can resolve and set itinerary.match.
-      if (!state.itinerary?.match) return 'list_matches_node';
-      return state.conversation_stage === 'collecting_preferences'
-        ? 'collect_preferences_node'
-        : 'confirm_dates_node';
+      return 'confirm_dates_node';
     case 'trip_complete':
       return END;
     default:
