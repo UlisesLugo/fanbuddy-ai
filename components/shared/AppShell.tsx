@@ -1,6 +1,6 @@
 'use client';
 
-import { Compass, Crown, LayoutGrid, Plus, Radar, Settings } from 'lucide-react';
+import { Compass, Crown, LayoutGrid, Plus, Settings } from 'lucide-react';
 import { UserButton } from '@clerk/nextjs';
 import Link from 'next/link';
 
@@ -57,10 +57,6 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
               <LayoutGrid className="size-5 shrink-0" strokeWidth={2} />
               Hub
             </Link>
-            <a href="#" className={`${navBase} ${navInactive}`}>
-              <Radar className="size-5 shrink-0" strokeWidth={2} />
-              Radar
-            </a>
             <Link
               href="/chat"
               className={`${navBase} ${activePage === 'chat' ? navActive : navInactive}`}
@@ -117,13 +113,6 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
           <LayoutGrid className="size-6" strokeWidth={2} />
           <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Hub</span>
         </Link>
-        <a
-          href="#"
-          className="flex flex-col items-center justify-center p-2 text-landing-on-surface/50"
-        >
-          <Radar className="size-6" strokeWidth={2} />
-          <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Radar</span>
-        </a>
         <Link
           href="/chat"
           className={`flex flex-col items-center justify-center rounded-xl p-2 px-4 ${activePage === 'chat' ? 'bg-emerald-100 text-emerald-700' : 'text-landing-on-surface/50'}`}

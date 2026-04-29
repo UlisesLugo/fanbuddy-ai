@@ -130,8 +130,10 @@ export default function TripDetailPage({ params }: { params: Promise<{ id: strin
 
         {status === 'loading' && (
           <div className="flex flex-1 overflow-hidden">
-            <SkeletonPane />
-            <div className="w-80 border-l border-landing-outline-variant/10 bg-landing-container-low">
+            <div className="w-full lg:w-[420px] lg:shrink-0">
+              <SkeletonPane />
+            </div>
+            <div className="hidden flex-1 border-l border-landing-outline-variant/10 bg-landing-container-lowest lg:block">
               <SkeletonPane />
             </div>
           </div>
@@ -165,8 +167,8 @@ export default function TripDetailPage({ params }: { params: Promise<{ id: strin
 
         {status === 'loaded' && data && (
           <div className="flex flex-1 overflow-hidden">
-            {/* Conversation panel */}
-            <section className="relative flex flex-1 flex-col bg-white">
+            {/* Conversation — narrower left sidebar */}
+            <section className="relative flex w-full flex-col bg-white lg:w-[420px] lg:shrink-0">
               <div className="border-b border-landing-outline-variant/10 px-8 py-5">
                 <h3 className="font-headline text-lg font-bold tracking-tight">Conversation</h3>
                 <p className="text-[10px] uppercase tracking-wider text-landing-on-surface-variant">
@@ -201,10 +203,13 @@ export default function TripDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </section>
 
-            {/* Itinerary panel */}
-            <aside className="hidden w-80 flex-col overflow-y-auto border-l border-landing-outline-variant/10 bg-landing-container-low p-8 lg:flex">
+            {/* Itinerary — primary main area on desktop */}
+            <main
+              className="hidden flex-1 flex-col overflow-hidden border-l border-landing-outline-variant/10 bg-landing-container-lowest p-8 lg:flex"
+              aria-label="Live itinerary"
+            >
               <ItineraryPanel itinerary={data.itinerary} activities={data.activities} />
-            </aside>
+            </main>
           </div>
         )}
       </div>

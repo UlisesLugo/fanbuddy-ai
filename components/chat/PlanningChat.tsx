@@ -14,7 +14,7 @@ import {
   Shield,
   UtensilsCrossed,
 } from 'lucide-react';
-import { UserButton } from '@clerk/nextjs';
+import { useUser } from '@clerk/nextjs';
 import Image from 'next/image';
 import {
   FormEvent,
@@ -109,7 +109,7 @@ function LinksBlock({
   links: FreeTierLinks;
 }) {
   return (
-    <div className="flex max-w-[90%] gap-4">
+    <div className="flex w-full gap-4">
       <AiAvatar />
       <div className="flex-1 space-y-4">
         <div className="rounded-2xl rounded-tl-none bg-landing-container-low px-5 py-4 text-[15px] leading-[1.65] text-landing-on-surface/80">
@@ -160,9 +160,9 @@ function FixtureCardsBlock({
   }
 
   return (
-    <div className="flex max-w-[90%] gap-4">
+    <div className="flex w-full gap-4">
       <AiAvatar />
-      <div className="flex-1 space-y-4">
+      <div className="flex-1 min-w-0 space-y-4">
         <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 leading-relaxed text-landing-on-surface">
           Here are the next upcoming fixtures — tap a match to plan your trip:
         </div>
@@ -201,24 +201,20 @@ function FixtureCardsBlock({
                   {i + 1}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="truncate text-sm font-bold text-landing-on-surface">
-                    {f.homeTeam} <span className="font-normal text-landing-on-surface-variant">vs</span> {f.awayTeam}
+                  <p className="text-sm font-bold leading-snug text-landing-on-surface">
+                    {f.homeTeam}{' '}
+                    <span className="font-normal text-landing-on-surface-variant">vs</span>{' '}
+                    {f.awayTeam}
                   </p>
-                  <div className="mt-0.5 flex items-center gap-2">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-landing-primary/70">
                       {f.competition}
                     </span>
-                    {f.venue && (
-                      <>
-                        <span className="text-landing-outline-variant/40">·</span>
-                        <span className="truncate text-[10px] text-landing-on-surface-variant">{f.venue}</span>
-                      </>
-                    )}
+                    <span className="text-landing-outline-variant/40">·</span>
+                    <span className="text-[10px] font-medium text-landing-on-surface-variant">
+                      {dateStr}{timeStr ? ` · ${timeStr} UTC` : ''}
+                    </span>
                   </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-xs font-semibold text-landing-on-surface">{dateStr}</p>
-                  {timeStr && <p className="text-[10px] text-landing-on-surface-variant">{timeStr} UTC</p>}
                 </div>
                 {isSelected
                   ? <Check className="size-4 shrink-0 text-landing-primary" strokeWidth={2.5} />
@@ -257,7 +253,7 @@ function RichCardsBlock({
   const flightTotal = itinerary.flight.totalPriceEur;
 
   return (
-    <div className="flex max-w-[90%] gap-4">
+    <div className="flex w-full gap-4">
       <AiAvatar />
       <div className="flex-1 space-y-4">
         <div className="rounded-2xl rounded-tl-none bg-landing-container-low p-4 text-landing-on-surface">
@@ -398,6 +394,8 @@ export function PlanningChat() {
     favorite_team: { id: number; name: string };
   } | null>(null);
   // Stable thread_id for this session — enables conversation memory across messages
+  const { user } = useUser();
+  const avatarLetter = user?.primaryEmailAddress?.emailAddress?.charAt(0).toUpperCase() ?? '?';
   const [threadId] = useState(() => crypto.randomUUID());
   const [hasSentFirst, setHasSentFirst] = useState(false);
   const hasSentFirstRef = useRef(false);
@@ -624,26 +622,22 @@ export function PlanningChat() {
   return (
     <AppShell activePage="chat">
       <div className="flex flex-1 overflow-hidden">
-            <section className="relative flex flex-1 flex-col bg-white">
+            <section className="relative flex w-full flex-col bg-white lg:w-[420px] lg:shrink-0">
               <div className="flex items-center justify-between border-b border-landing-outline-variant/10 px-4 py-5 sm:px-8 sm:py-6">
                 <div>
                   <h2 className="font-headline text-lg font-bold tracking-tight sm:text-xl">
-                    {currentItinerary
-                      ? `Trip Planner: ${currentItinerary.flight.outbound.destination}`
-                      : 'Trip Planner'}
+                    FanBuddy
                   </h2>
                   <p className="text-[10px] uppercase tracking-wider text-landing-on-surface-variant">
                     AI Assistant Online
                   </p>
                 </div>
                 <div className="flex -space-x-2">
-                  <UserButton
-                    appearance={{
-                      elements: {
-                        avatarBox: 'h-8 w-8 rounded-full border-2 border-white',
-                      },
-                    }}
-                  />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-gradient-to-br from-emerald-500 to-emerald-800 shadow-sm">
+                    <span className="font-headline text-sm font-black text-white">
+                      {avatarLetter}
+                    </span>
+                  </div>
                   <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-landing-primary-container">
                     <Bot
                       className="size-4 text-landing-primary"
@@ -670,7 +664,7 @@ export function PlanningChat() {
                   </div>
                 )}
 
-                {items.map((m) => {
+                {items.filter((m) => !(savedPrefs && m.id === '1')).map((m) => {
                   if (m.role === 'user') {
                     return (
                       <div
@@ -815,12 +809,13 @@ export function PlanningChat() {
               </div>
             </section>
 
-            <aside
-              className="hidden w-80 flex-col border-l border-landing-outline-variant/10 bg-landing-container-low p-8 lg:flex"
+            {/* Itinerary — primary main area on desktop */}
+            <main
+              className="hidden flex-1 flex-col border-l border-landing-outline-variant/10 bg-landing-container-lowest p-8 lg:flex overflow-hidden"
               aria-label="Live itinerary"
             >
               <ItineraryPanel itinerary={currentItinerary} activities={currentActivities} />
-            </aside>
+            </main>
       </div>
     </AppShell>
   );
