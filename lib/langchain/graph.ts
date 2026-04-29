@@ -211,9 +211,9 @@ async function router_node(state: State): Promise<Partial<State>> {
 Current session state (use this to classify conversation_stage):
 - favorite_team: ${state.user_preferences.favorite_team || 'UNKNOWN'}
 - fixture_list loaded: ${state.fixture_list?.length ? `yes (${state.fixture_list.length} fixtures)` : 'no'}
-- selected_match_id: ${state.user_preferences.selected_match_id ?? 'UNKNOWN'}
+- selected_match_id: ${state.user_preferences.selected_match_id ?? 'null'}
 - origin_city: ${state.user_preferences.origin_city || 'UNKNOWN'}
-- spending_tier: ${state.user_preferences.spending_tier ?? 'UNKNOWN'}
+- spending_tier: ${state.user_preferences.spending_tier ?? 'null'}
 - travel_dates: ${state.user_preferences.travel_dates ? `${state.user_preferences.travel_dates.checkIn} to ${state.user_preferences.travel_dates.checkOut}` : 'UNKNOWN'}
 - match kickoff (UTC): ${kickoffUtc ?? 'UNKNOWN'} — use this to resolve relative date expressions like "three days before" or "the day of the match"
 - trip_complete: ${state.trip_complete}
@@ -254,7 +254,9 @@ User message: "${lastMessage.content}"`,
       favorite_team:
         result.favorite_team ?? state.user_preferences.favorite_team,
       selected_match_id:
-        result.selected_match_id ??
+        (result.selected_match_id && /^\d+$/.test(result.selected_match_id)
+          ? result.selected_match_id
+          : null) ??
         state.user_preferences.selected_match_id ??
         null,
       travel_dates:
@@ -467,19 +469,8 @@ async function confirm_dates_node(state: State): Promise<Partial<State>> {
   }
 
   // User asked for a recommendation — compute dates from spending tier
-  if (state.wants_date_recommendation) {
-    const match = state.itinerary?.match;
-    if (!match) {
-      const reply =
-        'I lost track of the match details. Could you pick a match again?';
-      return { direct_reply: reply, messages: [new AIMessage(reply)] };
-    }
-
-    if (!spending_tier) {
-      const reply =
-        'Please choose a spending style first: Luxury, Value, or Budget.';
-      return { direct_reply: reply, messages: [new AIMessage(reply)] };
-    }
+  const match = state.itinerary?.match;
+  if (state.wants_date_recommendation && match && spending_tier) {
     const dates = recommendTravelDates(match.kickoffUtc, spending_tier);
     return {
       user_preferences: {
@@ -490,7 +481,6 @@ async function confirm_dates_node(state: State): Promise<Partial<State>> {
   }
 
   // Ask for dates
-  const match = state.itinerary?.match;
   const kickoffHint = match
     ? ` The match is on ${new Date(match.kickoffUtc).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}.`
     : '';
@@ -1049,18 +1039,27 @@ export function routeFromRouter(
   state: Pick<State, 'trip_complete' | 'conversation_stage' | 'itinerary'>,
 ): string | typeof END {
   if (state.trip_complete) return END;
+
+  // The LLM classifies the stage in the same call it extracts a newly-selected
+  // match ID, so it may advance to 'collecting_preferences' or 'confirming_dates'
+  // before list_matches_node has had a chance to geocode the fixture and set
+  // itinerary.match.  Route through list_matches_node first to resolve it.
+  if (
+    !state.itinerary?.match &&
+    (state.conversation_stage === 'collecting_preferences' ||
+      state.conversation_stage === 'confirming_dates')
+  ) {
+    return 'list_matches_node';
+  }
+
   switch (state.conversation_stage) {
     case 'collecting_team':
     case 'selecting_match':
       return 'list_matches_node';
     case 'collecting_preferences':
+      return 'collect_preferences_node';
     case 'confirming_dates':
-      // If a match ID was just selected but the fixture hasn't been geocoded yet,
-      // pass through list_matches_node first so it can resolve and set itinerary.match.
-      if (!state.itinerary?.match) return 'list_matches_node';
-      return state.conversation_stage === 'collecting_preferences'
-        ? 'collect_preferences_node'
-        : 'confirm_dates_node';
+      return 'confirm_dates_node';
     case 'trip_complete':
       return END;
     default:

@@ -1,12 +1,12 @@
 'use client';
 
-import { Compass, Crown, LayoutGrid, Plus, Radar, Settings } from 'lucide-react';
+import { Compass, Crown, LayoutGrid, Plus, Settings } from 'lucide-react';
 import { UserButton } from '@clerk/nextjs';
 import Link from 'next/link';
 
 interface AppShellProps {
   children: React.ReactNode;
-  activePage?: 'hub' | 'chat';
+  activePage?: 'hub' | 'chat' | 'profile';
 }
 
 const navBase =
@@ -57,10 +57,6 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
               <LayoutGrid className="size-5 shrink-0" strokeWidth={2} />
               Hub
             </Link>
-            <a href="#" className={`${navBase} ${navInactive}`}>
-              <Radar className="size-5 shrink-0" strokeWidth={2} />
-              Radar
-            </a>
             <Link
               href="/chat"
               className={`${navBase} ${activePage === 'chat' ? navActive : navInactive}`}
@@ -68,10 +64,13 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
               <Compass className="size-5 shrink-0" strokeWidth={2} />
               Voyage Mode
             </Link>
-            <a href="#" className={`${navBase} ${navInactive}`}>
+            <Link
+              href="/profile"
+              className={`${navBase} ${activePage === 'profile' ? navActive : navInactive}`}
+            >
               <Crown className="size-5 shrink-0" strokeWidth={2} />
-              Subscription
-            </a>
+              Profile
+            </Link>
           </nav>
           <div className="mt-auto space-y-3 px-4 pb-8">
             <button
@@ -114,13 +113,6 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
           <LayoutGrid className="size-6" strokeWidth={2} />
           <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Hub</span>
         </Link>
-        <a
-          href="#"
-          className="flex flex-col items-center justify-center p-2 text-landing-on-surface/50"
-        >
-          <Radar className="size-6" strokeWidth={2} />
-          <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Radar</span>
-        </a>
         <Link
           href="/chat"
           className={`flex flex-col items-center justify-center rounded-xl p-2 px-4 ${activePage === 'chat' ? 'bg-emerald-100 text-emerald-700' : 'text-landing-on-surface/50'}`}
@@ -132,13 +124,13 @@ export default function AppShell({ children, activePage = 'chat' }: AppShellProp
           />
           <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Voyage</span>
         </Link>
-        <a
-          href="#"
-          className="flex flex-col items-center justify-center p-2 text-landing-on-surface/50"
+        <Link
+          href="/profile"
+          className={`flex flex-col items-center justify-center p-2 ${activePage === 'profile' ? 'text-emerald-700' : 'text-landing-on-surface/50'}`}
         >
           <Crown className="size-6" strokeWidth={2} />
-          <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Plans</span>
-        </a>
+          <span className="mt-1 text-[10px] font-bold uppercase tracking-widest">Profile</span>
+        </Link>
       </nav>
     </div>
   );
